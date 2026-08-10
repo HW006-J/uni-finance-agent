@@ -57,3 +57,17 @@ export class AIRateLimitedError extends Error {
     this.name = "AIRateLimitedError";
   }
 }
+
+/**
+ * Thrown when a conversational turn takes longer than our own wall-clock
+ * budget to complete - a message that needs several tool-call rounds can
+ * otherwise chain rate-limit waits into a multi-minute hang with no upper
+ * bound. This gives the UI a guaranteed point to stop waiting and show a
+ * clear error instead of sitting on a loading indicator indefinitely.
+ */
+export class AITimeoutError extends Error {
+  constructor() {
+    super("The AI provider took too long to respond.");
+    this.name = "AITimeoutError";
+  }
+}

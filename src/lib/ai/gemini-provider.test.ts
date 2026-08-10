@@ -23,7 +23,7 @@ vi.mock("@google/genai", () => ({
 }));
 
 import { GeminiProvider, getGeminiConfigStatus } from "./gemini-provider";
-import { AIProviderNotConfiguredError, AIRateLimitedError } from "./provider";
+import { AIProviderNotConfiguredError, AIRateLimitedError, AITimeoutError } from "./provider";
 import { makeProfile } from "@/lib/finance/test-helpers";
 
 function rateLimitError(retryDelaySeconds = 0.01): Error & { status: number } {
@@ -108,21 +108,63 @@ describe("GeminiProvider", () => {
     expect(secondCallArgs.message[0].functionResponse.response.error).toBeTruthy();
   });
 
-  it("retries once on a rate-limited (429) response, honoring the API's suggested delay, and succeeds", async () => {
-    sendMessageMock.mockRejectedValueOnce(rateLimitError()).mockResolvedValueOnce({ functionCalls: undefined, text: "Hi there!" });
+  it("retries once on a rate-limited (429) response with a short fixed delay, then succeeds", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMessageMock.mockRejectedValueOnce(rateLimitError()).mockResolvedValueOnce({ functionCalls: undefined, text: "Hi there!" });
 
-    const provider = new GeminiProvider();
-    const result = await provider.converse({ history: [], message: "hi", profileId: "p1" });
+      const provider = new GeminiProvider();
+      const resultPromise = provider.converse({ history: [], message: "hi", profileId: "p1" });
+      await vi.advanceTimersByTimeAsync(2_000);
+      const result = await resultPromise;
 
-    expect(sendMessageMock).toHaveBeenCalledTimes(2);
-    expect(result.reply).toBe("Hi there!");
+      expect(sendMessageMock).toHaveBeenCalledTimes(2);
+      expect(result.reply).toBe("Hi there!");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("gives up after repeated rate limiting and throws a distinct, actionable error", async () => {
-    sendMessageMock.mockRejectedValue(rateLimitError());
+  it("fails fast (a single retry, not a long wait) after repeated rate limiting, reporting the API's suggested delay", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMessageMock.mockRejectedValue(rateLimitError(54));
 
-    const provider = new GeminiProvider();
-    await expect(provider.converse({ history: [], message: "hi", profileId: "p1" })).rejects.toBeInstanceOf(AIRateLimitedError);
+      const provider = new GeminiProvider();
+      const resultPromise = provider.converse({ history: [], message: "hi", profileId: "p1" });
+      const assertion = expect(resultPromise).rejects.toBeInstanceOf(AIRateLimitedError);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await assertion;
+
+      let caught: unknown;
+      try {
+        await resultPromise;
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBeInstanceOf(AIRateLimitedError);
+      expect((caught as AIRateLimitedError).retryAfterSeconds).toBe(54);
+
+      // Exactly one retry (two total attempts) - not a long internal wait chain.
+      expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds an entire turn to an overall time budget, even if individual requests never error out", async () => {
+    vi.useFakeTimers();
+    try {
+      sendMessageMock.mockImplementation(() => new Promise(() => {})); // never resolves
+
+      const provider = new GeminiProvider();
+      const resultPromise = provider.converse({ history: [], message: "hi", profileId: "p1" });
+      const assertion = expect(resultPromise).rejects.toBeInstanceOf(AITimeoutError);
+      await vi.advanceTimersByTimeAsync(46_000);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stops replying with a fallback when the model never produces text", async () => {

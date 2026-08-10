@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { DEMO_PROFILE_ID } from "@/lib/constants";
-import { getAIProvider, AIProviderNotConfiguredError, AIRateLimitedError } from "@/lib/ai";
+import { getAIProvider, AIProviderNotConfiguredError, AIRateLimitedError, AITimeoutError } from "@/lib/ai";
 import { SupabaseNotConfiguredError } from "@/lib/supabase/client";
 
 const chatTurnSchema = z.object({
@@ -48,6 +48,9 @@ export async function POST(request: Request) {
         { error: "rate_limited", retryAfterSeconds: error.retryAfterSeconds ?? null },
         { status: 429 },
       );
+    }
+    if (error instanceof AITimeoutError) {
+      return NextResponse.json({ error: "timeout" }, { status: 504 });
     }
     console.error("[POST /api/chat]", error);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });

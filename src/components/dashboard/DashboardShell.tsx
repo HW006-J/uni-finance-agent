@@ -59,6 +59,12 @@ export function DashboardShell({
     }
   }
 
+  // Hard client-side backstop so the "..." bubble is guaranteed to clear even
+  // if the server-side timeout (see CONVERSE_TIMEOUT_MS in gemini-provider.ts,
+  // ~45s) somehow doesn't fire - a bit longer than that so the server's own
+  // clear error message wins the race in the normal case.
+  const CHAT_TIMEOUT_MS = 60_000;
+
   async function handleSend(text: string) {
     const history: ChatTurn[] = messages
       .filter((m) => !m.pending && !m.error)
@@ -69,11 +75,15 @@ export function DashboardShell({
     setMessages((prev) => [...prev, userMessage, { id: pendingId, role: "assistant", content: "Thinking…", pending: true }]);
     setIsSending(true);
 
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), CHAT_TIMEOUT_MS);
+
     try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, history }),
+        signal: controller.signal,
       });
 
       if (!res.ok) {
@@ -84,9 +94,15 @@ export function DashboardShell({
             : body.error === "supabase_not_configured"
               ? "The database isn't configured yet."
               : body.error === "rate_limited"
-                ? `Gemini's free tier is rate-limited right now - wait ${body.retryAfterSeconds ? `${Math.ceil(body.retryAfterSeconds)}s` : "a few seconds"} and try again.`
-                : "Something went wrong on my end - try again in a moment.";
+                ? `Gemini is temporarily rate-limited — try again in ${body.retryAfterSeconds ? `${Math.ceil(body.retryAfterSeconds)}s` : "a few seconds"}. Anything already confirmed above was saved.`
+                : body.error === "timeout"
+                  ? "Gemini is taking too long to respond (likely rate-limited) — try again shortly. Anything already confirmed above was saved."
+                  : "Something went wrong on my end - try again in a moment.";
         setMessages((prev) => prev.map((m) => (m.id === pendingId ? { ...m, content: errorText, pending: false, error: true } : m)));
+        // A slow/failed reply doesn't mean nothing happened - tool calls the
+        // model already made before the failure are real, already-committed
+        // writes. Pick those up rather than leaving the dashboard stale.
+        await refreshSummary();
         return;
       }
 
@@ -98,11 +114,15 @@ export function DashboardShell({
       if (data.actions && data.actions.length > 0) {
         await refreshSummary();
       }
-    } catch {
-      setMessages((prev) =>
-        prev.map((m) => (m.id === pendingId ? { ...m, content: "Couldn't reach the server - check your connection and try again.", pending: false, error: true } : m)),
-      );
+    } catch (err) {
+      const isAbort = err instanceof DOMException && err.name === "AbortError";
+      const errorText = isAbort
+        ? "Gemini is temporarily rate-limited or taking too long — try again shortly. Anything already confirmed above was saved."
+        : "Couldn't reach the server - check your connection and try again.";
+      setMessages((prev) => prev.map((m) => (m.id === pendingId ? { ...m, content: errorText, pending: false, error: true } : m)));
+      await refreshSummary();
     } finally {
+      clearTimeout(timeoutId);
       setIsSending(false);
     }
   }

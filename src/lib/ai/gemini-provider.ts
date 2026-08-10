@@ -14,6 +14,7 @@ import { executeTool, ToolValidationError, TOOLS } from "./tools";
 import {
   AIProviderNotConfiguredError,
   AIRateLimitedError,
+  AITimeoutError,
   type AIProvider,
   type AIReplyResult,
   type AssistantAction,
@@ -68,8 +69,25 @@ function toGeminiHistory(history: ChatTurn[]): Content[] {
 }
 
 const RATE_LIMIT_STATUS = 429;
-const MAX_RATE_LIMIT_RETRIES = 2;
-const DEFAULT_RETRY_DELAY_MS = 3000;
+/**
+ * One quick, short retry to absorb a transient blip. A conversational turn
+ * that needs several tool-call rounds makes several requests, so retrying
+ * each one for the API's *suggested* delay (which can be 30-60s+ on the
+ * free tier) compounds across rounds into a multi-minute hang with no
+ * upper bound - exactly what produced an indefinite "..." in testing.
+ * Failing fast here and reporting the real delay lets the caller decide
+ * whether to wait, instead of us silently blocking on their behalf.
+ */
+const MAX_RATE_LIMIT_RETRIES = 1;
+const RETRY_DELAY_MS = 2000;
+/**
+ * Hard ceiling on an entire conversational turn (every tool-call round
+ * included), so the UI always gets a response within a bounded time no
+ * matter how many rounds or retries happen underneath. Tool calls already
+ * in flight when this fires still complete and persist server-side - we
+ * only stop waiting on the model's next message.
+ */
+const CONVERSE_TIMEOUT_MS = 45_000;
 
 function parseRetryDelaySeconds(message: string): number | undefined {
   const match = message.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
@@ -79,9 +97,9 @@ function parseRetryDelaySeconds(message: string): number | undefined {
 /**
  * Gemini's free tier is easy to hit mid-conversation - a single turn that
  * triggers a few tool calls costs a few requests. Retries a rate-limited
- * (429) call a couple of times using the API's own suggested delay when
- * present, then gives up with a distinct, user-actionable error instead of
- * a generic 500.
+ * (429) call once after a short fixed delay, then gives up with a
+ * distinct, user-actionable error (carrying the API's suggested wait) so
+ * the caller can decide when to retry, rather than a generic 500.
  */
 async function sendMessageWithRetry(chat: Chat, params: SendMessageParameters): Promise<GenerateContentResponse> {
   for (let attempt = 0; ; attempt += 1) {
@@ -96,10 +114,25 @@ async function sendMessageWithRetry(chat: Chat, params: SendMessageParameters): 
       if (attempt >= MAX_RATE_LIMIT_RETRIES) {
         throw new AIRateLimitedError(retryAfterSeconds);
       }
-      const delayMs = retryAfterSeconds ? retryAfterSeconds * 1000 : DEFAULT_RETRY_DELAY_MS * (attempt + 1);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
     }
   }
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new AITimeoutError()), timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
 }
 
 /**
@@ -122,6 +155,10 @@ export class GeminiProvider implements AIProvider {
   }
 
   async converse(input: ConverseInput): Promise<AIReplyResult> {
+    return withTimeout(this.converseInner(input), CONVERSE_TIMEOUT_MS);
+  }
+
+  private async converseInner(input: ConverseInput): Promise<AIReplyResult> {
     const chat = this.client.chats.create({
       model: this.model,
       history: toGeminiHistory(input.history),
@@ -132,7 +169,9 @@ export class GeminiProvider implements AIProvider {
     });
 
     const actions: AssistantAction[] = [];
+    let requestCount = 0;
     let response = await sendMessageWithRetry(chat, { message: input.message });
+    requestCount += 1;
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i += 1) {
       const calls = response.functionCalls;
@@ -157,7 +196,12 @@ export class GeminiProvider implements AIProvider {
       }
 
       response = await sendMessageWithRetry(chat, { message: responseParts });
+      requestCount += 1;
     }
+
+    // Cheap ongoing visibility into how expensive a turn was on a
+    // rate-limited free tier - each round here is a real Gemini request.
+    console.log(`[GeminiProvider] turn used ${requestCount} Gemini request(s) across ${actions.length} tool call(s)`);
 
     return { reply: response.text?.trim() || "Done.", actions };
   }

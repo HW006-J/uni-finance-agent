@@ -2,7 +2,7 @@ import "server-only";
 import { GeminiProvider } from "./gemini-provider";
 import type { AIProvider } from "./provider";
 
-export { AIProviderNotConfiguredError, AIRateLimitedError } from "./provider";
+export { AIProviderNotConfiguredError, AIRateLimitedError, AITimeoutError } from "./provider";
 export type { AIProvider, AIReplyResult, AssistantAction, ChatTurn, ConverseInput } from "./provider";
 export { getGeminiConfigStatus } from "./gemini-provider";
 
