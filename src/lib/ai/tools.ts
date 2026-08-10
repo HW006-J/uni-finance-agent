@@ -21,8 +21,8 @@ import {
 import { formatMoney } from "@/lib/finance/format";
 import { FREQUENCY_LABELS, RECURRENCE_FREQUENCIES, SPEND_CATEGORIES } from "@/lib/finance/constants";
 import {
-  addIncome,
   addOrUpdateExpense,
+  addOrUpdateIncome,
   createOrUpdateGoal,
   getFinancialState,
   getProfileCurrency,
@@ -129,7 +129,7 @@ const setEmergencyBufferTool: ToolDefinition<{ amount: number | null }> = {
 const addIncomeTool: ToolDefinition<{ source: string; amount: number; date: string; frequency: (typeof RECURRENCE_FREQUENCIES)[number] }> = {
   name: "add_income",
   description:
-    "Record an income the student expects to receive - a student loan/maintenance payment, a job wage, a bursary, etc. For recurring income, `date` is the next expected payment date.",
+    "Record an income the student expects to receive - a student loan/maintenance payment, a job wage, a bursary, etc. For recurring income, `date` is the next expected payment date. Matched by source name, case-insensitively, per student - restating an income with the same source updates it rather than creating a duplicate.",
   schema: z.object({
     source: z.string().min(1).max(80).describe("Where the money is from, e.g. 'Student Finance'"),
     amount: money,
@@ -137,7 +137,7 @@ const addIncomeTool: ToolDefinition<{ source: string; amount: number; date: stri
     frequency,
   }),
   execute: async (args, ctx) => {
-    const [income, currency] = await Promise.all([addIncome(ctx.profileId, args), getProfileCurrency(ctx.profileId)]);
+    const [income, currency] = await Promise.all([addOrUpdateIncome(ctx.profileId, args), getProfileCurrency(ctx.profileId)]);
     return {
       message: `✓ ${income.source} income of ${formatMoney(income.amount, currency)} added (${FREQUENCY_LABELS[income.frequency]})`,
       data: { income },

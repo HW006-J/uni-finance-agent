@@ -7,7 +7,7 @@ const repoMocks = vi.hoisted(() => ({
   getProfileCurrency: vi.fn().mockResolvedValue("GBP"),
   setCurrentBalance: vi.fn(),
   setEmergencyBuffer: vi.fn(),
-  addIncome: vi.fn(),
+  addOrUpdateIncome: vi.fn(),
   addOrUpdateExpense: vi.fn(),
   logTransaction: vi.fn(),
   createOrUpdateGoal: vi.fn(),
@@ -23,8 +23,16 @@ vi.mock("@google/genai", () => ({
 }));
 
 import { GeminiProvider, getGeminiConfigStatus } from "./gemini-provider";
-import { AIProviderNotConfiguredError } from "./provider";
+import { AIProviderNotConfiguredError, AIRateLimitedError } from "./provider";
 import { makeProfile } from "@/lib/finance/test-helpers";
+
+function rateLimitError(retryDelaySeconds = 0.01): Error & { status: number } {
+  const err = new Error(
+    `{"error":{"code":429,"message":"quota exceeded","status":"RESOURCE_EXHAUSTED","details":[{"@type":"type.googleapis.com/google.rpc.RetryInfo","retryDelay":"${retryDelaySeconds}s"}]}}`,
+  ) as Error & { status: number };
+  err.status = 429;
+  return err;
+}
 
 describe("GeminiProvider", () => {
   const originalKey = process.env.GEMINI_API_KEY;
@@ -98,6 +106,23 @@ describe("GeminiProvider", () => {
 
     const secondCallArgs = sendMessageMock.mock.calls[1][0];
     expect(secondCallArgs.message[0].functionResponse.response.error).toBeTruthy();
+  });
+
+  it("retries once on a rate-limited (429) response, honoring the API's suggested delay, and succeeds", async () => {
+    sendMessageMock.mockRejectedValueOnce(rateLimitError()).mockResolvedValueOnce({ functionCalls: undefined, text: "Hi there!" });
+
+    const provider = new GeminiProvider();
+    const result = await provider.converse({ history: [], message: "hi", profileId: "p1" });
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(2);
+    expect(result.reply).toBe("Hi there!");
+  });
+
+  it("gives up after repeated rate limiting and throws a distinct, actionable error", async () => {
+    sendMessageMock.mockRejectedValue(rateLimitError());
+
+    const provider = new GeminiProvider();
+    await expect(provider.converse({ history: [], message: "hi", profileId: "p1" })).rejects.toBeInstanceOf(AIRateLimitedError);
   });
 
   it("stops replying with a fallback when the model never produces text", async () => {

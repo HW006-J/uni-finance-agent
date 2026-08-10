@@ -211,28 +211,31 @@ export async function setEmergencyBuffer(profileId: string, amount: number | nul
   return toProfile(data as ProfileRow);
 }
 
-export interface AddIncomeInput {
+export interface UpsertIncomeInput {
   source: string;
   amount: number;
   date: string;
   frequency: RecurrenceFrequency;
 }
 
-export async function addIncome(profileId: string, input: AddIncomeInput): Promise<Income> {
+/**
+ * Insert a new income, or update the existing income with a
+ * case-insensitive matching source for this profile - so restating "my
+ * next Student Finance payment is £3,000" updates the existing row rather
+ * than creating a duplicate that would double-count income.
+ */
+export async function addOrUpdateIncome(profileId: string, input: UpsertIncomeInput): Promise<Income> {
   const supabase = getSupabaseClient();
-  const { data, error } = await supabase
-    .from("incomes")
-    .insert({
-      profile_id: profileId,
-      source: input.source,
-      amount: input.amount,
-      date: input.date,
-      frequency: input.frequency,
-    })
-    .select("*")
-    .single();
-  if (error) raise("Failed to add income", error);
-  return toIncome(data as IncomeRow);
+  const { data, error } = await supabase.rpc("upsert_income", {
+    p_profile_id: profileId,
+    p_source: input.source,
+    p_amount: input.amount,
+    p_date: input.date,
+    p_frequency: input.frequency,
+  });
+  if (error) raise("Failed to add/update income", error);
+  const row = (data as IncomeRow[])[0];
+  return toIncome(row);
 }
 
 export interface UpsertExpenseInput {

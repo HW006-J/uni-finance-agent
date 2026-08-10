@@ -7,7 +7,7 @@ const repoMocks = vi.hoisted(() => ({
   getProfileCurrency: vi.fn().mockResolvedValue("GBP"),
   setCurrentBalance: vi.fn(),
   setEmergencyBuffer: vi.fn(),
-  addIncome: vi.fn(),
+  addOrUpdateIncome: vi.fn(),
   addOrUpdateExpense: vi.fn(),
   logTransaction: vi.fn(),
   createOrUpdateGoal: vi.fn(),
@@ -125,12 +125,12 @@ describe("executeTool", () => {
         { profileId: "p1" },
       ),
     ).rejects.toBeInstanceOf(ToolValidationError);
-    expect(repoMocks.addIncome).not.toHaveBeenCalled();
+    expect(repoMocks.addOrUpdateIncome).not.toHaveBeenCalled();
   });
 
   it("formats add_income and create_or_update_goal confirmations in the profile's actual currency, not a hardcoded default", async () => {
     repoMocks.getProfileCurrency.mockResolvedValueOnce("USD");
-    repoMocks.addIncome.mockResolvedValue({ source: "Wages", amount: 100, frequency: "weekly" });
+    repoMocks.addOrUpdateIncome.mockResolvedValue({ source: "Wages", amount: 100, frequency: "weekly" });
 
     const result = await executeTool(
       "add_income",

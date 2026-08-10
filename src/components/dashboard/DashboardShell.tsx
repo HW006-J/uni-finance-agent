@@ -83,7 +83,9 @@ export function DashboardShell({
             ? "The AI companion isn't configured yet (missing GEMINI_API_KEY)."
             : body.error === "supabase_not_configured"
               ? "The database isn't configured yet."
-              : "Something went wrong on my end - try again in a moment.";
+              : body.error === "rate_limited"
+                ? `Gemini's free tier is rate-limited right now - wait ${body.retryAfterSeconds ? `${Math.ceil(body.retryAfterSeconds)}s` : "a few seconds"} and try again.`
+                : "Something went wrong on my end - try again in a moment.";
         setMessages((prev) => prev.map((m) => (m.id === pendingId ? { ...m, content: errorText, pending: false, error: true } : m)));
         return;
       }

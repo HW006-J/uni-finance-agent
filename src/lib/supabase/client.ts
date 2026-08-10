@@ -32,6 +32,17 @@ export function getSupabaseConfigStatus(): SupabaseConfigStatus {
 let cachedClient: SupabaseClient | null = null;
 
 /**
+ * `createClient` wants the bare project URL (`https://<ref>.supabase.co`)
+ * and appends `/rest/v1` itself. Supabase's dashboard also shows a "REST
+ * API URL" that already has that suffix, which is an easy value to
+ * copy-paste by mistake and produces confusing PostgREST errors - strip it
+ * defensively so either value works.
+ */
+export function normalizeSupabaseUrl(url: string): string {
+  return url.trim().replace(/\/rest\/v1\/?$/, "").replace(/\/+$/, "");
+}
+
+/**
  * Server-only Supabase client authenticated with the service role key.
  * Never import this from a client component. Row Level Security is
  * enabled on every table with no policies, so only this service-role
@@ -43,7 +54,7 @@ export function getSupabaseClient(): SupabaseClient {
     throw new SupabaseNotConfiguredError(status.missing);
   }
   if (!cachedClient) {
-    cachedClient = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    cachedClient = createClient(normalizeSupabaseUrl(process.env.SUPABASE_URL!), process.env.SUPABASE_SERVICE_ROLE_KEY!, {
       auth: { persistSession: false },
     });
   }

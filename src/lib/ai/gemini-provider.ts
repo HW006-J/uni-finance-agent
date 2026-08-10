@@ -1,9 +1,25 @@
 import "server-only";
-import { GoogleGenAI, type Content, type FunctionDeclaration, type Part } from "@google/genai";
+import {
+  GoogleGenAI,
+  type Chat,
+  type Content,
+  type FunctionDeclaration,
+  type GenerateContentResponse,
+  type Part,
+  type SendMessageParameters,
+} from "@google/genai";
 import { z } from "zod";
-import { SYSTEM_PROMPT } from "./system-prompt";
+import { buildSystemPrompt } from "./system-prompt";
 import { executeTool, ToolValidationError, TOOLS } from "./tools";
-import { AIProviderNotConfiguredError, type AIProvider, type AIReplyResult, type AssistantAction, type ChatTurn, type ConverseInput } from "./provider";
+import {
+  AIProviderNotConfiguredError,
+  AIRateLimitedError,
+  type AIProvider,
+  type AIReplyResult,
+  type AssistantAction,
+  type ChatTurn,
+  type ConverseInput,
+} from "./provider";
 
 export interface GeminiConfigStatus {
   configured: boolean;
@@ -16,9 +32,20 @@ export function getGeminiConfigStatus(): GeminiConfigStatus {
   return { configured: missing.length === 0, missing };
 }
 
-const DEFAULT_MODEL = "gemini-2.5-flash";
-/** Guards against a runaway tool-call loop; a real conversation needs a handful at most. */
-const MAX_TOOL_ITERATIONS = 6;
+// A stable "lite" alias (not a dated model id) so this keeps working as
+// Google retires older model versions. Verified working against a real
+// free-tier API key - the non-lite "flash-latest" alias hit a much
+// stricter shared free-tier quota in testing and stayed 429'd for several
+// minutes, while "flash-lite-latest" kept working throughout.
+const DEFAULT_MODEL = "gemini-flash-lite-latest";
+/**
+ * Guards against a runaway tool-call loop. A single message that states
+ * several facts at once (balance + income + several expenses, as in the
+ * demo script) can legitimately need one round per fact plus a final round
+ * for the wrap-up reply - too tight a cap here silently drops the last
+ * fact and/or truncates the reply to a generic fallback.
+ */
+const MAX_TOOL_ITERATIONS = 15;
 
 /** Shared by the text provider and the voice ephemeral-token route so both surfaces expose the same tools. */
 export function buildFunctionDeclarations(): FunctionDeclaration[] {
@@ -38,6 +65,41 @@ function toGeminiHistory(history: ChatTurn[]): Content[] {
     role: turn.role === "assistant" ? "model" : "user",
     parts: [{ text: turn.content }],
   }));
+}
+
+const RATE_LIMIT_STATUS = 429;
+const MAX_RATE_LIMIT_RETRIES = 2;
+const DEFAULT_RETRY_DELAY_MS = 3000;
+
+function parseRetryDelaySeconds(message: string): number | undefined {
+  const match = message.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  return match ? Number.parseFloat(match[1]) : undefined;
+}
+
+/**
+ * Gemini's free tier is easy to hit mid-conversation - a single turn that
+ * triggers a few tool calls costs a few requests. Retries a rate-limited
+ * (429) call a couple of times using the API's own suggested delay when
+ * present, then gives up with a distinct, user-actionable error instead of
+ * a generic 500.
+ */
+async function sendMessageWithRetry(chat: Chat, params: SendMessageParameters): Promise<GenerateContentResponse> {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await chat.sendMessage(params);
+    } catch (error) {
+      const status = (error as { status?: number } | undefined)?.status;
+      const message = error instanceof Error ? error.message : "";
+      if (status !== RATE_LIMIT_STATUS) throw error;
+
+      const retryAfterSeconds = parseRetryDelaySeconds(message);
+      if (attempt >= MAX_RATE_LIMIT_RETRIES) {
+        throw new AIRateLimitedError(retryAfterSeconds);
+      }
+      const delayMs = retryAfterSeconds ? retryAfterSeconds * 1000 : DEFAULT_RETRY_DELAY_MS * (attempt + 1);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
 }
 
 /**
@@ -64,13 +126,13 @@ export class GeminiProvider implements AIProvider {
       model: this.model,
       history: toGeminiHistory(input.history),
       config: {
-        systemInstruction: SYSTEM_PROMPT,
+        systemInstruction: buildSystemPrompt(),
         tools: [{ functionDeclarations: buildFunctionDeclarations() }],
       },
     });
 
     const actions: AssistantAction[] = [];
-    let response = await chat.sendMessage({ message: input.message });
+    let response = await sendMessageWithRetry(chat, { message: input.message });
 
     for (let i = 0; i < MAX_TOOL_ITERATIONS; i += 1) {
       const calls = response.functionCalls;
@@ -94,7 +156,7 @@ export class GeminiProvider implements AIProvider {
         }
       }
 
-      response = await chat.sendMessage({ message: responseParts });
+      response = await sendMessageWithRetry(chat, { message: responseParts });
     }
 
     return { reply: response.text?.trim() || "Done.", actions };

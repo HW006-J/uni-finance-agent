@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { DEMO_PROFILE_ID } from "@/lib/constants";
-import { getAIProvider, AIProviderNotConfiguredError } from "@/lib/ai";
+import { getAIProvider, AIProviderNotConfiguredError, AIRateLimitedError } from "@/lib/ai";
 import { SupabaseNotConfiguredError } from "@/lib/supabase/client";
 
 const chatTurnSchema = z.object({
@@ -41,6 +41,12 @@ export async function POST(request: Request) {
       return NextResponse.json(
         { error: "supabase_not_configured", missing: error.missingEnvVars },
         { status: 503 },
+      );
+    }
+    if (error instanceof AIRateLimitedError) {
+      return NextResponse.json(
+        { error: "rate_limited", retryAfterSeconds: error.retryAfterSeconds ?? null },
+        { status: 429 },
       );
     }
     console.error("[POST /api/chat]", error);

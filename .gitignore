@@ -37,6 +37,9 @@ yarn-error.log*
 # vercel
 .vercel
 
+# supabase CLI local link/session metadata (machine-specific, not secret but not portable)
+supabase/.temp
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { GoogleGenAI, Modality } from "@google/genai";
 import { getGeminiConfigStatus, buildFunctionDeclarations } from "@/lib/ai/gemini-provider";
-import { SYSTEM_PROMPT } from "@/lib/ai/system-prompt";
+import { buildSystemPrompt } from "@/lib/ai/system-prompt";
 
-const DEFAULT_LIVE_MODEL = "gemini-2.5-flash-native-audio-preview-09-2025";
+// A stable alias, verified to exist against a real API key (as of writing).
+const DEFAULT_LIVE_MODEL = "gemini-2.5-flash-native-audio-latest";
 
 /**
  * Mints a short-lived ephemeral Gemini token so the browser can open a
@@ -35,7 +36,7 @@ export async function POST() {
           model,
           config: {
             responseModalities: [Modality.AUDIO],
-            systemInstruction: SYSTEM_PROMPT,
+            systemInstruction: buildSystemPrompt(),
             tools: [{ functionDeclarations: buildFunctionDeclarations() }],
             inputAudioTranscription: {},
             outputAudioTranscription: {},

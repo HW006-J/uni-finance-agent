@@ -43,3 +43,17 @@ export class AIProviderNotConfiguredError extends Error {
     this.name = "AIProviderNotConfiguredError";
   }
 }
+
+/**
+ * Thrown when the provider's API rejects a request for being over its rate
+ * limit (very plausible on Gemini's free tier - a single conversational
+ * turn can cost several requests when it involves tool calls). Kept
+ * distinct from a generic failure so callers can show something
+ * actionable ("try again in a few seconds") instead of a bare 500.
+ */
+export class AIRateLimitedError extends Error {
+  constructor(public retryAfterSeconds?: number) {
+    super("The AI provider is rate-limiting requests right now.");
+    this.name = "AIRateLimitedError";
+  }
+}
