@@ -6,7 +6,7 @@ export const AFFORDABILITY_STATUS_LABELS: Record<AffordabilityStatus, string> = 
   caution: "Caution",
   risky: "Risky",
   not_recommended: "Not recommended",
-  cannot_afford: "Can't afford",
+  cannot_afford: "Over budget",
 };
 
 export const AFFORDABILITY_STATUS_TONES: Record<AffordabilityStatus, BadgeTone> = {

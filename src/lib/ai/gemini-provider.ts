@@ -48,8 +48,7 @@ const DEFAULT_MODEL = "gemini-flash-lite-latest";
  */
 const MAX_TOOL_ITERATIONS = 15;
 
-/** Shared by the text provider and the voice ephemeral-token route so both surfaces expose the same tools. */
-export function buildFunctionDeclarations(): FunctionDeclaration[] {
+function buildFunctionDeclarations(): FunctionDeclaration[] {
   return TOOLS.map((tool) => {
     const jsonSchema = z.toJSONSchema(tool.schema, { target: "draft-7" }) as Record<string, unknown>;
     delete jsonSchema.$schema;

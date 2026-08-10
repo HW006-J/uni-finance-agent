@@ -15,6 +15,7 @@ export function ChatPanel({
   onMicClick,
   micActive = false,
   voiceError,
+  liveTranscript,
 }: {
   messages: DisplayMessage[];
   onSend: (text: string) => void;
@@ -23,9 +24,14 @@ export function ChatPanel({
   onMicClick?: () => void;
   micActive?: boolean;
   voiceError?: string | null;
+  /** Live speech-to-text transcript, shown in the input field while listening. */
+  liveTranscript?: string;
 }) {
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  // While listening, the input just mirrors the live transcript - derived
+  // directly at render time rather than synced via an effect.
+  const displayValue = micActive ? (liveTranscript ?? "") : input;
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -63,17 +69,17 @@ export function ChatPanel({
 
       <form onSubmit={handleSubmit} className="mt-4 flex items-center gap-2">
         <input
-          value={input}
+          value={displayValue}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Tell me what's going on with your money…"
-          disabled={isSending}
-          className="min-w-0 flex-1 rounded-2xl border border-border bg-cream px-4 py-3 text-sm font-medium text-ink placeholder:text-ink-faint focus:border-brand focus:outline-none"
+          placeholder={micActive ? "Listening…" : "Tell me what's going on with your money…"}
+          disabled={isSending || micActive}
+          className="min-w-0 flex-1 rounded-2xl border border-border bg-cream px-4 py-3 text-sm font-medium text-ink placeholder:text-ink-faint focus:border-brand focus:outline-none disabled:opacity-70"
         />
         {onMicClick ? (
           <button
             type="button"
             onClick={onMicClick}
-            title="Talk instead of type"
+            title={micActive ? "Stop listening" : "Talk instead of type"}
             className={cx(
               "flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-xl transition-all active:translate-y-px",
               micActive ? "bg-warn text-white" : "bg-accent text-white hover:bg-accent-dark",
@@ -82,7 +88,7 @@ export function ChatPanel({
             {micActive ? "■" : "🎙️"}
           </button>
         ) : null}
-        <Button type="submit" disabled={isSending || !input.trim()} className="shrink-0">
+        <Button type="submit" disabled={isSending || micActive || !input.trim()} className="shrink-0">
           Send
         </Button>
       </form>

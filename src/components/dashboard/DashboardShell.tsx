@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { BalanceHero } from "./BalanceHero";
 import { BudgetCategories } from "./BudgetCategories";
 import { UpcomingCommitments } from "./UpcomingCommitments";
@@ -8,7 +8,7 @@ import { RecentTransactions } from "./RecentTransactions";
 import { GoalsPanel } from "./GoalsPanel";
 import { EmptyState } from "./EmptyState";
 import { ChatPanel } from "@/components/chat/ChatPanel";
-import { useGeminiLive } from "@/components/chat/useGeminiLive";
+import { useSpeechToText } from "@/components/chat/useSpeechToText";
 import type { DisplayMessage } from "@/components/chat/types";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -127,70 +127,27 @@ export function DashboardShell({
     }
   }
 
-  const voicePendingRef = useRef<{ userId: string; assistantId: string } | null>(null);
-
+  // Real browser speech-to-text (no server round trip, no Gemini
+  // involvement in recognition itself). The recognized transcript is
+  // submitted through the exact same handleSend used for typed input, so
+  // voice and text share identical business logic end to end.
   const {
-    status: voiceStatus,
-    error: voiceError,
-    connect: connectVoice,
-    disconnect: disconnectVoice,
-  } = useGeminiLive({
-    onPartial: ({ userText, assistantText }) => {
-      if (!voicePendingRef.current) {
-        const userId = newId();
-        const assistantId = newId();
-        voicePendingRef.current = { userId, assistantId };
-        setMessages((prev) => [
-          ...prev,
-          { id: userId, role: "user", content: userText || "…" },
-          { id: assistantId, role: "assistant", content: assistantText || "…", pending: true },
-        ]);
-        return;
-      }
-      const { userId, assistantId } = voicePendingRef.current;
-      setMessages((prev) =>
-        prev.map((m) => {
-          if (m.id === userId) return { ...m, content: userText || "…" };
-          if (m.id === assistantId) return { ...m, content: assistantText || "…" };
-          return m;
-        }),
-      );
-    },
-    onExchange: ({ userText, assistantText, actions }) => {
-      const pending = voicePendingRef.current;
-      voicePendingRef.current = null;
-      if (pending) {
-        setMessages((prev) =>
-          prev.map((m) => {
-            if (m.id === pending.userId) return { ...m, content: userText || m.content };
-            if (m.id === pending.assistantId) {
-              return { ...m, content: assistantText || "(no reply)", actions, pending: false };
-            }
-            return m;
-          }),
-        );
-      } else if (userText || assistantText) {
-        setMessages((prev) => [
-          ...prev,
-          { id: newId(), role: "user", content: userText },
-          { id: newId(), role: "assistant", content: assistantText || "(no reply)", actions, pending: false },
-        ]);
-      }
-      if (actions.length > 0) {
-        void refreshSummary();
-      }
+    status: speechStatus,
+    interimTranscript,
+    error: speechError,
+    start: startListening,
+    stop: stopListening,
+  } = useSpeechToText({
+    onFinalTranscript: (text) => {
+      void handleSend(text);
     },
   });
 
-  useEffect(() => {
-    return () => disconnectVoice();
-  }, [disconnectVoice]);
-
   function handleMicClick() {
-    if (voiceStatus === "listening" || voiceStatus === "connecting") {
-      disconnectVoice();
+    if (speechStatus === "listening") {
+      stopListening();
     } else {
-      void connectVoice();
+      startListening();
     }
   }
 
@@ -273,18 +230,11 @@ export function DashboardShell({
               messages={messages}
               onSend={handleSend}
               isSending={isSending}
-              statusMessage={
-                isSending
-                  ? "Checking your budget…"
-                  : voiceStatus === "connecting"
-                    ? "Connecting voice…"
-                    : voiceStatus === "listening"
-                      ? "Listening…"
-                      : null
-              }
+              statusMessage={isSending ? "Checking your budget…" : speechStatus === "listening" ? "Listening…" : null}
               onMicClick={geminiConfigured ? handleMicClick : undefined}
-              micActive={voiceStatus === "listening" || voiceStatus === "connecting"}
-              voiceError={voiceError}
+              micActive={speechStatus === "listening"}
+              voiceError={speechError}
+              liveTranscript={speechStatus === "listening" ? interimTranscript : undefined}
             />
           </div>
         </div>
