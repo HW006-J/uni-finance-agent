@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { BalanceHero } from "./BalanceHero";
 import { BudgetCategories } from "./BudgetCategories";
 import { UpcomingCommitments } from "./UpcomingCommitments";
@@ -42,11 +43,23 @@ export function DashboardShell({
   geminiConfigured: boolean;
   geminiMissing: string[];
 }) {
+  const router = useRouter();
   const [summary, setSummary] = useState(initialSummary);
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [resetBusy, setResetBusy] = useState(false);
+  const [lockingOut, setLockingOut] = useState(false);
+
+  async function handleLockDemo() {
+    setLockingOut(true);
+    try {
+      await fetch("/api/session", { method: "DELETE" });
+    } finally {
+      router.push("/login");
+      router.refresh();
+    }
+  }
 
   async function refreshSummary() {
     try {
@@ -178,9 +191,14 @@ export function DashboardShell({
           <h1 className="text-2xl font-extrabold text-ink">{PRODUCT_NAME}</h1>
           <p className="text-sm text-ink-soft">{PRODUCT_TAGLINE}</p>
         </div>
-        <Button variant="ghost" onClick={() => setResetOpen(true)}>
-          Reset demo data
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="ghost" onClick={() => setResetOpen(true)}>
+            Reset demo data
+          </Button>
+          <Button variant="ghost" onClick={handleLockDemo} disabled={lockingOut}>
+            Lock demo
+          </Button>
+        </div>
       </header>
 
       {!geminiConfigured ? (
