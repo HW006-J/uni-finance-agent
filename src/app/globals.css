@@ -1,0 +1,70 @@
+@import "tailwindcss";
+
+@theme {
+  /* Backgrounds */
+  --color-cream: #fbf5ea;
+  --color-cream-dark: #f2e9d6;
+  --color-surface: #fffefb;
+
+  /* Text */
+  --color-ink: #241f18;
+  --color-ink-soft: #736b5e;
+  --color-ink-faint: #a89f8f;
+
+  /* Structure */
+  --color-border: #eae2d2;
+
+  /* Brand: fresh energetic green */
+  --color-brand: #1fae64;
+  --color-brand-dark: #12784a;
+  --color-brand-light: #e3f6ec;
+
+  /* Secondary warm accent */
+  --color-accent: #f2a73b;
+  --color-accent-dark: #b6790f;
+  --color-accent-light: #fcefd9;
+
+  /* Restrained warning / danger */
+  --color-warn: #dd5b3e;
+  --color-warn-dark: #a83f28;
+  --color-warn-light: #fbeae4;
+
+  /* Caution (between comfortable and risky) */
+  --color-caution: #d99b2b;
+  --color-caution-dark: #96690f;
+  --color-caution-light: #fbf1dd;
+
+  --font-sans: var(--font-manrope), ui-sans-serif, system-ui, sans-serif;
+}
+
+body {
+  background: var(--color-cream);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* Subtle tactile depth instead of glassmorphism: a soft, warm drop shadow. */
+.shadow-tactile {
+  box-shadow:
+    0 1px 2px rgba(36, 31, 24, 0.04),
+    0 8px 20px -6px rgba(36, 31, 24, 0.1);
+}
+
+.shadow-tactile-sm {
+  box-shadow: 0 1px 2px rgba(36, 31, 24, 0.06);
+}
+
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-pop-in {
+  animation: pop-in 0.22s ease-out both;
+}
