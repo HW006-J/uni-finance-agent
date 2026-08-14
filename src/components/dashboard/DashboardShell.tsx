@@ -8,6 +8,7 @@ import { UpcomingCommitments } from "./UpcomingCommitments";
 import { RecentTransactions } from "./RecentTransactions";
 import { GoalsPanel } from "./GoalsPanel";
 import { EmptyState } from "./EmptyState";
+import { MoneyTipCard } from "./MoneyTipCard";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { useSpeechToText } from "@/components/chat/useSpeechToText";
 import type { DisplayMessage } from "@/components/chat/types";
@@ -15,7 +16,8 @@ import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
-import { PRODUCT_NAME, PRODUCT_TAGLINE, DISCLAIMER } from "@/lib/brand";
+import { AppHeader } from "@/components/nav/AppHeader";
+import { DISCLAIMER } from "@/lib/brand";
 import { formatMoney } from "@/lib/finance/format";
 import type { FinancialSummary } from "@/lib/finance/engine";
 import type { ChatTurn } from "@/lib/ai/provider";
@@ -26,11 +28,12 @@ function newId(): string {
 
 function isEmptyProfile(summary: FinancialSummary): boolean {
   return (
-    summary.profile.currentBalance === 0 &&
+    !summary.profile.balanceKnown &&
     summary.budgetCategories.length === 0 &&
     summary.recentTransactions.length === 0 &&
     summary.goals.length === 0 &&
-    summary.nextIncome === null
+    summary.nextIncome === null &&
+    summary.fundingAwards.length === 0
   );
 }
 
@@ -186,20 +189,18 @@ export function DashboardShell({
 
   return (
     <main className="mx-auto max-w-7xl px-6 py-8">
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-extrabold text-ink">{PRODUCT_NAME}</h1>
-          <p className="text-sm text-ink-soft">{PRODUCT_TAGLINE}</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={() => setResetOpen(true)}>
-            Reset demo data
-          </Button>
-          <Button variant="ghost" onClick={handleLockDemo} disabled={lockingOut}>
-            Lock demo
-          </Button>
-        </div>
-      </header>
+      <AppHeader
+        actions={
+          <>
+            <Button variant="ghost" onClick={() => setResetOpen(true)}>
+              Reset demo data
+            </Button>
+            <Button variant="ghost" onClick={handleLockDemo} disabled={lockingOut}>
+              Lock demo
+            </Button>
+          </>
+        }
+      />
 
       {!geminiConfigured ? (
         <Card className="mt-6 border-caution/40 bg-caution-light p-4 text-sm font-semibold text-caution-dark">
@@ -211,14 +212,18 @@ export function DashboardShell({
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">
           {empty ? (
-            <EmptyState />
+            <>
+              <EmptyState />
+              <MoneyTipCard context={{ page: "budget", summary }} />
+            </>
           ) : (
             <>
               <BalanceHero summary={summary} />
+              <MoneyTipCard context={{ page: "budget", summary }} />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
                 <StatTile
                   label="Discretionary remaining"
-                  value={formatMoney(summary.discretionaryCash, summary.profile.currency)}
+                  value={summary.discretionaryCash !== null ? formatMoney(summary.discretionaryCash, summary.profile.currency) : "—"}
                   sublabel="before your next income"
                 />
                 <StatTile

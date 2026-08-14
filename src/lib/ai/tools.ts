@@ -14,6 +14,7 @@ import {
   calculateDiscretionaryCash,
   calculateFinancialSummary,
   calculateHorizonDays,
+  calculatePeriodBudgetSummary,
   calculateSafeWeeklySpend,
   checkAffordability,
   forecastBalance,
@@ -27,6 +28,9 @@ import {
   getFinancialState,
   getProfileCurrency,
   logTransaction,
+  recordFundingAward,
+  recordIncomeReceived,
+  setBudgetHorizon,
   setCurrentBalance,
   setEmergencyBuffer,
 } from "@/lib/supabase/repository";
@@ -129,7 +133,7 @@ const setEmergencyBufferTool: ToolDefinition<{ amount: number | null }> = {
 const addIncomeTool: ToolDefinition<{ source: string; amount: number; date: string; frequency: (typeof RECURRENCE_FREQUENCIES)[number] }> = {
   name: "add_income",
   description:
-    "Record an income the student expects to receive - a student loan/maintenance payment, a job wage, a bursary, etc. For recurring income, `date` is the next expected payment date. Matched by source name, case-insensitively, per student - restating an income with the same source updates it rather than creating a duplicate.",
+    "Record a FUTURE payment the student expects to receive on a concrete date - e.g. 'my next Student Finance payment is £3,000 on 8 January', a recurring job wage, a bursary. `date` is that concrete next expected payment date - never invent one. Do NOT use this for: a payment already received (use record_income_received), or a TOTAL/annual/termly funding amount with no single payment date (use record_funding_award) - e.g. '£20,000 for the year' is a funding award, not a £20,000 payment on any date. Matched by source name, case-insensitively, per student - restating an income with the same source updates it rather than creating a duplicate.",
   schema: z.object({
     source: z.string().min(1).max(80).describe("Where the money is from, e.g. 'Student Finance'"),
     amount: money,
@@ -142,6 +146,85 @@ const addIncomeTool: ToolDefinition<{ source: string; amount: number; date: stri
       message: `✓ ${income.source} income of ${formatMoney(income.amount, currency)} added (${FREQUENCY_LABELS[income.frequency]})`,
       data: { income },
     };
+  },
+};
+
+const recordFundingAwardTool: ToolDefinition<{
+  source: string;
+  totalAmount: number;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  scheduleKnown?: boolean;
+  notes?: string | null;
+}> = {
+  name: "record_funding_award",
+  description:
+    "Record a TOTAL funding amount across a period - e.g. 'I have £20,000 of student finance for the year', '£12,000 to last the academic year', '£8,000 for this term'. This is NEVER current cash and NEVER a single future payment - do not also call set_current_balance or add_income with this amount. Only set periodStart/periodEnd if the student actually stated them (or they're unambiguous, e.g. a UK academic year) - leave them unset rather than inventing dates. Set scheduleKnown=true only if the student also described how it's actually paid out (instalments/dates); otherwise leave it false. Matched by source name, case-insensitively - restating updates the existing award rather than duplicating it.",
+  schema: z.object({
+    source: z.string().min(1).max(80).describe("e.g. 'Maintenance Loan', 'Student Finance'"),
+    totalAmount: money,
+    periodStart: isoDate.nullable().optional(),
+    periodEnd: isoDate.nullable().optional(),
+    scheduleKnown: z.boolean().optional().describe("True only if the student described the actual payment schedule"),
+    notes: z.string().max(200).nullable().optional(),
+  }),
+  execute: async (args, ctx) => {
+    const [award, currency] = await Promise.all([
+      recordFundingAward(ctx.profileId, args),
+      getProfileCurrency(ctx.profileId),
+    ]);
+    return {
+      message: `✓ ${award.source} recorded: ${formatMoney(award.totalAmount, currency)} total funding${award.periodStart && award.periodEnd ? ` (${award.periodStart.slice(0, 10)} to ${award.periodEnd.slice(0, 10)})` : ""}`,
+      data: { fundingAward: award },
+    };
+  },
+};
+
+const recordIncomeReceivedTool: ToolDefinition<{ source: string; amount: number; occurredOn?: string; notes?: string | null }> = {
+  name: "record_income_received",
+  description:
+    "Record a payment the student says has ALREADY arrived - e.g. 'I was just paid £3,200', 'I just got my maintenance loan payment of £3,400'. Do NOT use this for a total/annual amount (use record_funding_award) or a future payment (use add_income). If the tool result shows balanceKnown=false, the student's current total balance still isn't known - the receipt itself was NOT assumed to be their whole balance, so ask them for their current available total rather than stating a balance figure.",
+  schema: z.object({
+    source: z.string().min(1).max(80).describe("e.g. 'Student Finance', 'Wages'"),
+    amount: money,
+    occurredOn: isoDate.optional().describe("Defaults to today if omitted"),
+    notes: z.string().max(200).nullable().optional(),
+  }),
+  execute: async (args, ctx) => {
+    const { receipt, profile } = await recordIncomeReceived(ctx.profileId, args);
+    const message = profile.balanceKnown
+      ? `✓ ${formatMoney(receipt.amount, profile.currency)} ${receipt.source} payment received — balance now ${formatMoney(profile.currentBalance, profile.currency)}`
+      : `✓ ${formatMoney(receipt.amount, profile.currency)} ${receipt.source} payment recorded — current total balance still not known`;
+    return { message, data: { receipt, profile } };
+  },
+};
+
+const setBudgetHorizonTool: ToolDefinition<{ date: string | null; note?: string | null }> = {
+  name: "set_budget_horizon",
+  description:
+    "Set (or clear, with date=null) an explicit date the student's current money needs to last until (e.g. 'I need this £3,500 to last until 8 January'), independent of any known income date. This takes priority over the next-income date for all horizon/safe-spend calculations. Clear it with date=null if the student says it no longer applies, so calculations fall back to the next known income.",
+  schema: z.object({
+    date: isoDate.nullable(),
+    note: z.string().max(200).nullable().optional(),
+  }),
+  execute: async (args, ctx) => {
+    const profile = await setBudgetHorizon(ctx.profileId, args.date, args.note ?? null);
+    return {
+      message: args.date ? `✓ Budget horizon set to ${args.date.slice(0, 10)}` : "✓ Budget horizon cleared",
+      data: { profile },
+    };
+  },
+};
+
+const getPeriodBudgetSummaryTool: ToolDefinition<Record<string, never>> = {
+  name: "get_period_budget_summary",
+  description:
+    "Deterministically check TOTAL-PERIOD affordability for each recorded funding award - total funding for the period minus known recurring costs projected across that whole period (e.g. £20,000/year minus £12,000/year rent = £8,000 remaining for the year). This is separate from live cash-on-hand (get_financial_summary/get_safe_weekly_spend) - use it when the student asks whether their overall award covers their costs, not whether they can afford something right now.",
+  schema: z.object({}),
+  execute: async (_args, ctx) => {
+    const state = await getFinancialState(ctx.profileId);
+    const periodBudgets = state.fundingAwards.map((award) => calculatePeriodBudgetSummary(award, state.expenses));
+    return { message: "Checked total-period budget", data: { periodBudgets } };
   },
 };
 
@@ -235,6 +318,7 @@ const checkAffordabilityTool: ToolDefinition<{ purchaseAmount: number; descripti
       profile: state.profile,
       expenses: state.expenses,
       incomes: state.incomes,
+      fundingAwards: state.fundingAwards,
       purchaseAmount: args.purchaseAmount,
     });
     return {
@@ -251,30 +335,34 @@ const getSafeWeeklySpendTool: ToolDefinition<Record<string, never>> = {
   schema: z.object({}),
   execute: async (_args, ctx) => {
     const state = await getFinancialState(ctx.profileId);
-    const engineInput = { profile: state.profile, expenses: state.expenses, incomes: state.incomes };
-    const safeWeeklySpend = calculateSafeWeeklySpend(engineInput);
-    const discretionaryCash = calculateDiscretionaryCash(engineInput);
-    const horizonDays = calculateHorizonDays(state.incomes);
+    const engineInput = { profile: state.profile, expenses: state.expenses, incomes: state.incomes, fundingAwards: state.fundingAwards };
+    const balanceKnown = state.profile.balanceKnown;
+    const safeWeeklySpend = balanceKnown ? calculateSafeWeeklySpend(engineInput) : null;
+    const discretionaryCash = balanceKnown ? calculateDiscretionaryCash(engineInput) : null;
+    const horizonDays = calculateHorizonDays(engineInput);
     return {
-      message: "Safe weekly spend recalculated",
-      data: { safeWeeklySpend, discretionaryCash, horizonDays },
+      message: balanceKnown ? "Safe weekly spend recalculated" : "Current balance isn't known yet, so safe weekly spend can't be calculated",
+      data: { safeWeeklySpend, discretionaryCash, horizonDays, balanceKnown },
     };
   },
 };
 
 const forecastBalanceTool: ToolDefinition<{ daysAhead: number }> = {
   name: "forecast_balance",
-  description: "Deterministically project the student's balance a number of days into the future, accounting for known bills and income.",
+  description:
+    "Deterministically project the student's balance a number of days into the future, accounting for known bills and income. If the result shows balanceKnown=false, there's no real current balance to project from yet - tell the student you need their current balance first rather than stating a number.",
   schema: z.object({ daysAhead: z.number().int().min(1).max(365) }),
   execute: async (args, ctx) => {
     const state = await getFinancialState(ctx.profileId);
-    const forecastedBalance = forecastBalance(
-      { profile: state.profile, expenses: state.expenses, incomes: state.incomes },
-      args.daysAhead,
-    );
+    const balanceKnown = state.profile.balanceKnown;
+    const forecastedBalance = balanceKnown
+      ? forecastBalance({ profile: state.profile, expenses: state.expenses, incomes: state.incomes }, args.daysAhead)
+      : null;
     return {
-      message: `Forecasted balance ${args.daysAhead} days ahead`,
-      data: { daysAhead: args.daysAhead, forecastedBalance, currentBalance: state.profile.currentBalance },
+      message: balanceKnown
+        ? `Forecasted balance ${args.daysAhead} days ahead`
+        : "Current balance isn't known yet, so a forecast can't be calculated",
+      data: { daysAhead: args.daysAhead, forecastedBalance, balanceKnown, currentBalance: balanceKnown ? state.profile.currentBalance : null },
     };
   },
 };
@@ -285,6 +373,10 @@ export const TOOLS: ToolDefinition<any>[] = [
   setCurrentBalanceTool,
   setEmergencyBufferTool,
   addIncomeTool,
+  recordFundingAwardTool,
+  recordIncomeReceivedTool,
+  setBudgetHorizonTool,
+  getPeriodBudgetSummaryTool,
   addOrUpdateExpenseTool,
   logTransactionTool,
   createOrUpdateGoalTool,

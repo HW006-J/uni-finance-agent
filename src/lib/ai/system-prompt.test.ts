@@ -13,4 +13,18 @@ describe("buildSystemPrompt", () => {
     const today = new Date().toISOString().slice(0, 10);
     expect(prompt).toContain(`Today's date is ${today}`);
   });
+
+  it("distinguishes a total funding award from current cash and a single future payment (annual-funding bug regression)", () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain("record_funding_award");
+    expect(prompt).toContain("NEVER current cash");
+    expect(prompt).toContain("NEVER \"per term\" unless the student said per term");
+    expect(prompt).toContain("Never invent");
+  });
+
+  it("instructs the model to ask a clarifying question rather than guess an ambiguous funding schedule", () => {
+    const prompt = buildSystemPrompt();
+    expect(prompt).toContain("don't guess");
+    expect(prompt).toContain("ask ONE short clarifying question");
+  });
 });

@@ -11,12 +11,28 @@ const repoMocks = vi.hoisted(() => ({
   addOrUpdateExpense: vi.fn(),
   logTransaction: vi.fn(),
   createOrUpdateGoal: vi.fn(),
+  recordFundingAward: vi.fn(),
+  recordIncomeReceived: vi.fn(),
+  setBudgetHorizon: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase/repository", () => repoMocks);
 
 import { executeTool, ToolValidationError, TOOLS } from "./tools";
-import { makeExpense, makeProfile } from "@/lib/finance/test-helpers";
+import { makeExpense, makeFundingAward, makeProfile } from "@/lib/finance/test-helpers";
+
+function emptyState(overrides: Record<string, unknown> = {}) {
+  return {
+    profile: makeProfile(),
+    incomes: [],
+    expenses: [],
+    transactions: [],
+    goals: [],
+    fundingAwards: [],
+    incomeReceipts: [],
+    ...overrides,
+  };
+}
 
 describe("executeTool", () => {
   beforeEach(() => {
@@ -30,6 +46,10 @@ describe("executeTool", () => {
         "set_current_balance",
         "set_emergency_buffer",
         "add_income",
+        "record_funding_award",
+        "record_income_received",
+        "set_budget_horizon",
+        "get_period_budget_summary",
         "add_or_update_expense",
         "log_transaction",
         "create_or_update_goal",
@@ -81,17 +101,21 @@ describe("executeTool", () => {
   });
 
   it("check_affordability loads live state and runs it through the deterministic engine, not the model", async () => {
-    repoMocks.getFinancialState.mockResolvedValue({
-      profile: makeProfile({ currentBalance: 1000, emergencyBuffer: 0 }),
-      incomes: [],
-      expenses: [],
-      transactions: [],
-      goals: [],
-    });
+    repoMocks.getFinancialState.mockResolvedValue(
+      emptyState({ profile: makeProfile({ currentBalance: 1000, emergencyBuffer: 0, balanceKnown: true }) }),
+    );
 
     const result = await executeTool("check_affordability", { purchaseAmount: 100 }, { profileId: "p1" });
 
     expect(result.data.result).toMatchObject({ purchaseAmount: 100, status: "comfortable" });
+  });
+
+  it("check_affordability never invents an affordability verdict when the balance isn't known", async () => {
+    repoMocks.getFinancialState.mockResolvedValue(emptyState());
+
+    const result = await executeTool("check_affordability", { purchaseAmount: 20 }, { profileId: "p1" });
+
+    expect(result.data.result).toMatchObject({ status: "unknown_balance", balanceKnown: false });
   });
 
   it("add_or_update_expense forwards fields through to the repository upsert", async () => {
@@ -140,5 +164,130 @@ describe("executeTool", () => {
 
     expect(result.message).toContain("$100.00");
     expect(result.message).not.toContain("£");
+  });
+
+  // ---------------------------------------------------------------------
+  // V2: annual-funding bug regression tests, at the tool-boundary level.
+  // The tool layer must keep record_funding_award, record_income_received
+  // and add_income structurally distinct - none of them can be used to
+  // fake the others' effect (no invented dates/schedules/balances).
+  // ---------------------------------------------------------------------
+
+  it("record_funding_award stores a period total without touching current balance or incomes", async () => {
+    repoMocks.recordFundingAward.mockResolvedValue(
+      makeFundingAward({ source: "Maintenance Loan", totalAmount: 20000, periodStart: null, periodEnd: null, scheduleKnown: false }),
+    );
+
+    const result = await executeTool(
+      "record_funding_award",
+      { source: "Maintenance Loan", totalAmount: 20000 },
+      { profileId: "p1" },
+    );
+
+    expect(repoMocks.recordFundingAward).toHaveBeenCalledWith(
+      "p1",
+      expect.objectContaining({ source: "Maintenance Loan", totalAmount: 20000 }),
+    );
+    expect(repoMocks.setCurrentBalance).not.toHaveBeenCalled();
+    expect(repoMocks.addOrUpdateIncome).not.toHaveBeenCalled();
+    expect(result.message).toContain("20,000");
+  });
+
+  it("record_funding_award does not require or invent period dates", async () => {
+    repoMocks.recordFundingAward.mockResolvedValue(
+      makeFundingAward({ source: "Student Finance", totalAmount: 12000, periodStart: null, periodEnd: null }),
+    );
+
+    await executeTool("record_funding_award", { source: "Student Finance", totalAmount: 12000 }, { profileId: "p1" });
+
+    const callArgs = repoMocks.recordFundingAward.mock.calls[0][1] as Record<string, unknown>;
+    expect(callArgs.periodStart).toBeUndefined();
+    expect(callArgs.periodEnd).toBeUndefined();
+  });
+
+  it("record_income_received reports when the balance is still unknown rather than inventing a total", async () => {
+    repoMocks.recordIncomeReceived.mockResolvedValue({
+      receipt: { id: "r1", profileId: "p1", source: "Student Finance", amount: 3200, occurredOn: "2026-01-08", notes: null, appliedToBalance: false, createdAt: "2026-01-08T00:00:00.000Z" },
+      profile: makeProfile({ balanceKnown: false, currentBalance: 0 }),
+    });
+
+    const result = await executeTool(
+      "record_income_received",
+      { source: "Student Finance", amount: 3200 },
+      { profileId: "p1" },
+    );
+
+    expect(result.message).toContain("still not known");
+    expect((result.data.profile as { balanceKnown: boolean }).balanceKnown).toBe(false);
+  });
+
+  it("record_income_received folds the receipt into current balance once the balance is already known", async () => {
+    repoMocks.recordIncomeReceived.mockResolvedValue({
+      receipt: { id: "r1", profileId: "p1", source: "Student Finance", amount: 3200, occurredOn: "2026-01-08", notes: null, appliedToBalance: true, createdAt: "2026-01-08T00:00:00.000Z" },
+      profile: makeProfile({ balanceKnown: true, currentBalance: 7700 }),
+    });
+
+    const result = await executeTool(
+      "record_income_received",
+      { source: "Student Finance", amount: 3200 },
+      { profileId: "p1" },
+    );
+
+    expect(result.message).toContain("7,700");
+  });
+
+  it("set_budget_horizon persists an explicit horizon date", async () => {
+    repoMocks.setBudgetHorizon.mockResolvedValue(makeProfile({ budgetHorizonDate: "2026-01-08" }));
+
+    const result = await executeTool("set_budget_horizon", { date: "2026-01-08" }, { profileId: "p1" });
+
+    expect(repoMocks.setBudgetHorizon).toHaveBeenCalledWith("p1", "2026-01-08", null);
+    expect(result.message).toContain("2026-01-08");
+  });
+
+  it("forecast_balance never fabricates a projection when the balance isn't known", async () => {
+    repoMocks.getFinancialState.mockResolvedValue(emptyState());
+
+    const result = await executeTool("forecast_balance", { daysAhead: 30 }, { profileId: "p1" });
+
+    expect(result.data.forecastedBalance).toBeNull();
+    expect(result.data.balanceKnown).toBe(false);
+    expect(result.message).toContain("isn't known");
+  });
+
+  it("forecast_balance computes a real projection once the balance is known", async () => {
+    repoMocks.getFinancialState.mockResolvedValue(
+      emptyState({ profile: makeProfile({ currentBalance: 500, balanceKnown: true }) }),
+    );
+
+    const result = await executeTool("forecast_balance", { daysAhead: 30 }, { profileId: "p1" });
+
+    expect(result.data.forecastedBalance).toBe(500);
+    expect(result.data.balanceKnown).toBe(true);
+  });
+
+  it("set_budget_horizon can clear a previously-set horizon with date: null", async () => {
+    repoMocks.setBudgetHorizon.mockResolvedValue(makeProfile({ budgetHorizonDate: null }));
+
+    const result = await executeTool("set_budget_horizon", { date: null }, { profileId: "p1" });
+
+    expect(repoMocks.setBudgetHorizon).toHaveBeenCalledWith("p1", null, null);
+    expect(result.message).toContain("cleared");
+  });
+
+  it("get_period_budget_summary never reports a funding award as live cash", async () => {
+    repoMocks.getFinancialState.mockResolvedValue(
+      emptyState({
+        fundingAwards: [makeFundingAward({ source: "Maintenance Loan", totalAmount: 20000, periodStart: "2025-09-01", periodEnd: "2026-08-31" })],
+        expenses: [makeExpense({ name: "Rent", amount: 1000, category: "rent", frequency: "monthly" })],
+      }),
+    );
+
+    const result = await executeTool("get_period_budget_summary", {}, { profileId: "p1" });
+
+    const periodBudgets = result.data.periodBudgets as Array<{ totalFunding: number; remainingAfterExpenses: number | null }>;
+    expect(periodBudgets).toHaveLength(1);
+    expect(periodBudgets[0].totalFunding).toBe(20000);
+    expect(periodBudgets[0].remainingAfterExpenses).toBeCloseTo(8000, -1);
   });
 });

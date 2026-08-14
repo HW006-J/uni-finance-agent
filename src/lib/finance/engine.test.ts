@@ -4,7 +4,9 @@ import {
   calculateDiscretionaryCash,
   calculateExpectedEssentialSpend,
   calculateFinancialSummary,
+  calculateHorizon,
   calculateHorizonDays,
+  calculatePeriodBudgetSummary,
   calculateSafeWeeklySpend,
   checkAffordability,
   findNextIncome,
@@ -12,7 +14,7 @@ import {
   toMonthlyAmount,
   toWeeklyAmount,
 } from "./engine";
-import { makeExpense, makeGoal, makeIncome, makeProfile, makeTransaction } from "./test-helpers";
+import { makeExpense, makeFundingAward, makeGoal, makeIncome, makeIncomeReceipt, makeProfile, makeTransaction } from "./test-helpers";
 
 describe("toWeeklyAmount / toMonthlyAmount", () => {
   it("passes weekly amounts through unchanged", () => {
@@ -73,7 +75,7 @@ describe("calculateExpectedEssentialSpend", () => {
   });
 });
 
-describe("findNextIncome / calculateHorizonDays", () => {
+describe("findNextIncome", () => {
   const asOf = new Date("2026-01-01T00:00:00.000Z");
 
   it("finds the soonest upcoming income and its distance in days", () => {
@@ -100,19 +102,61 @@ describe("findNextIncome / calculateHorizonDays", () => {
     expect(next?.occursOn).toBe("2026-02-28T00:00:00.000Z");
   });
 
-  it("falls back to the default planning horizon when no income is known", () => {
-    expect(calculateHorizonDays([], asOf)).toBe(30);
-  });
-
   it("excludes a one-off income whose date has already passed", () => {
     const incomes = [makeIncome({ date: "2025-01-01T00:00:00.000Z", frequency: "one_off", amount: 500 })];
     expect(findNextIncome(incomes, asOf)).toBeNull();
   });
 });
 
+describe("calculateHorizon / calculateHorizonDays", () => {
+  const asOf = new Date("2026-01-01T00:00:00.000Z");
+  const profile = makeProfile();
+
+  it("falls back to the default planning horizon when nothing is known", () => {
+    const result = calculateHorizon({ profile, incomes: [] }, asOf);
+    expect(result.days).toBe(30);
+    expect(result.source).toBe("default");
+  });
+
+  it("prioritises an explicit budget-horizon date over everything else", () => {
+    const explicitProfile = makeProfile({ budgetHorizonDate: "2026-01-20" });
+    const incomes = [makeIncome({ date: "2026-01-10T00:00:00.000Z", frequency: "one_off", amount: 500 })];
+    const awards = [makeFundingAward({ periodEnd: "2026-01-05" })];
+
+    const result = calculateHorizon({ profile: explicitProfile, incomes, fundingAwards: awards }, asOf);
+
+    expect(result.source).toBe("explicit");
+    expect(result.days).toBe(19);
+  });
+
+  it("falls back to the next known income when there is no explicit horizon", () => {
+    const incomes = [makeIncome({ date: "2026-01-29T00:00:00.000Z", frequency: "one_off", amount: 3000 })];
+    const result = calculateHorizon({ profile, incomes }, asOf);
+    expect(result.source).toBe("next_income");
+    expect(result.days).toBe(28);
+  });
+
+  it("falls back to a funding award's period end when there is no explicit horizon or known income", () => {
+    const awards = [makeFundingAward({ periodEnd: "2026-06-30" })];
+    const result = calculateHorizon({ profile, incomes: [], fundingAwards: awards }, asOf);
+    expect(result.source).toBe("funding_period_end");
+    expect(result.days).toBe(180);
+  });
+
+  it("ignores a funding award period end that has already passed", () => {
+    const awards = [makeFundingAward({ periodEnd: "2025-06-30" })];
+    const result = calculateHorizon({ profile, incomes: [], fundingAwards: awards }, asOf);
+    expect(result.source).toBe("default");
+  });
+
+  it("calculateHorizonDays returns just the day count", () => {
+    expect(calculateHorizonDays({ profile, incomes: [] }, asOf)).toBe(30);
+  });
+});
+
 describe("calculateDiscretionaryCash / calculateSafeWeeklySpend", () => {
   const asOf = new Date("2026-01-01T00:00:00.000Z");
-  const profile = makeProfile({ currentBalance: 4500, emergencyBuffer: 500 });
+  const profile = makeProfile({ currentBalance: 4500, emergencyBuffer: 500, balanceKnown: true });
   const incomes = [makeIncome({ source: "Student Finance", amount: 3000, date: "2026-01-29T00:00:00.000Z", frequency: "one_off" })];
   const expenses = [
     makeExpense({ name: "Rent", amount: 650, category: "rent", frequency: "monthly" }),
@@ -139,21 +183,27 @@ describe("calculateDiscretionaryCash / calculateSafeWeeklySpend", () => {
   });
 
   it("never returns a negative safe-weekly-spend even when discretionary cash is negative", () => {
-    const brokeProfile = makeProfile({ currentBalance: 100, emergencyBuffer: 500 });
+    const brokeProfile = makeProfile({ currentBalance: 100, emergencyBuffer: 500, balanceKnown: true });
     const result = calculateSafeWeeklySpend({ profile: brokeProfile, expenses, incomes, asOf });
     expect(result).toBe(0);
   });
 
   it("treats an unset emergency buffer as zero", () => {
-    const noBufferProfile = makeProfile({ currentBalance: 4500, emergencyBuffer: null });
+    const noBufferProfile = makeProfile({ currentBalance: 4500, emergencyBuffer: null, balanceKnown: true });
     const result = calculateDiscretionaryCash({ profile: noBufferProfile, expenses, incomes, asOf });
     expect(result).toBeCloseTo(3456.92, 2);
+  });
+
+  it("a funding award with no bearing on the current window does not change discretionary cash", () => {
+    const awards = [makeFundingAward({ totalAmount: 20000, periodStart: "2025-09-01", periodEnd: "2026-06-30" })];
+    const result = calculateDiscretionaryCash({ profile, expenses, incomes, fundingAwards: awards, asOf });
+    expect(result).toBeCloseTo(2956.92, 2);
   });
 });
 
 describe("forecastBalance", () => {
   const asOf = new Date("2026-01-01T00:00:00.000Z");
-  const profile = makeProfile({ currentBalance: 4500 });
+  const profile = makeProfile({ currentBalance: 4500, balanceKnown: true });
   const incomes = [makeIncome({ amount: 3000, date: "2026-01-29T00:00:00.000Z", frequency: "one_off" })];
   const expenses = [
     makeExpense({ amount: 650, category: "rent", frequency: "monthly" }),
@@ -173,14 +223,14 @@ describe("forecastBalance", () => {
   });
 
   it("prorates a weekly bill with no known due date evenly across a multi-week window", () => {
-    const weeklyOnly = { profile: makeProfile({ currentBalance: 200 }), expenses: [makeExpense({ amount: 50, frequency: "weekly" })], incomes: [] };
+    const weeklyOnly = { profile: makeProfile({ currentBalance: 200, balanceKnown: true }), expenses: [makeExpense({ amount: 50, frequency: "weekly" })], incomes: [] };
     const result = forecastBalance(weeklyOnly, 21, asOf);
     expect(result).toBe(200 - 50 * 3);
   });
 
   it("counts every discrete occurrence of a dated weekly bill within the forecast window", () => {
     const datedWeekly = {
-      profile: makeProfile({ currentBalance: 200 }),
+      profile: makeProfile({ currentBalance: 200, balanceKnown: true }),
       expenses: [makeExpense({ amount: 50, frequency: "weekly", nextDueDate: asOf.toISOString() })],
       incomes: [],
     };
@@ -192,7 +242,7 @@ describe("forecastBalance", () => {
 
 describe("checkAffordability", () => {
   const asOf = new Date("2026-01-01T00:00:00.000Z");
-  const profile = makeProfile({ currentBalance: 4500, emergencyBuffer: 500 });
+  const profile = makeProfile({ currentBalance: 4500, emergencyBuffer: 500, balanceKnown: true });
   const incomes = [makeIncome({ amount: 3000, date: "2026-01-29T00:00:00.000Z", frequency: "one_off" })];
   const expenses = [
     makeExpense({ amount: 650, category: "rent", frequency: "monthly" }),
@@ -232,7 +282,7 @@ describe("checkAffordability", () => {
   });
 
   it("handles a profile with no income and already-negative discretionary cash", () => {
-    const brokeProfile = makeProfile({ currentBalance: 1000, emergencyBuffer: 200 });
+    const brokeProfile = makeProfile({ currentBalance: 1000, emergencyBuffer: 200, balanceKnown: true });
     const heavyExpenses = [
       makeExpense({ amount: 900, category: "rent", frequency: "monthly" }),
       makeExpense({ amount: 100, category: "groceries", frequency: "weekly" }),
@@ -247,8 +297,49 @@ describe("checkAffordability", () => {
     expect(result.status).toBe("not_recommended");
   });
 
+  it("marks status as unknown_balance and nulls every balance-derived figure when the balance hasn't been provided - even with committed bills that would otherwise show a fabricated shortfall", () => {
+    const unknownProfile = makeProfile({ currentBalance: 0, balanceKnown: false });
+    const heavyExpenses = [makeExpense({ amount: 900, category: "rent", frequency: "monthly" })];
+    const result = checkAffordability({ profile: unknownProfile, expenses: heavyExpenses, incomes: [], purchaseAmount: 20, asOf });
+    expect(result.status).toBe("unknown_balance");
+    expect(result.balanceKnown).toBe(false);
+    expect(result.currentBalance).toBeNull();
+    expect(result.discretionaryCash).toBeNull();
+    expect(result.remainingAfterPurchase).toBeNull();
+    expect(result.proportionOfDiscretionaryCash).toBeNull();
+  });
+
   it("rejects a negative purchase amount as an engine invariant violation", () => {
     expect(() => checkAffordability({ profile, expenses, incomes, purchaseAmount: -10, asOf })).toThrow();
+  });
+});
+
+describe("calculatePeriodBudgetSummary", () => {
+  it("computes total-period affordability separately from live cash (the original annual-funding bug)", () => {
+    // "My total maintenance loan is £10,000 for the academic year" + "rent is £1,000/month"
+    const award = makeFundingAward({
+      source: "Maintenance Loan",
+      totalAmount: 20000,
+      periodStart: "2025-09-01",
+      periodEnd: "2026-08-31", // 12 months later - matches the worked example in AGENTS.md
+    });
+    const expenses = [makeExpense({ name: "Rent", amount: 1000, category: "rent", frequency: "monthly", active: true })];
+
+    const result = calculatePeriodBudgetSummary(award, expenses);
+
+    expect(result.totalFunding).toBe(20000);
+    expect(result.needsPeriodDates).toBe(false);
+    expect(result.expensesOverPeriod).toBeCloseTo(12000, -1); // ~£1000/month * 12 months
+    expect(result.remainingAfterExpenses).toBeCloseTo(8000, -1);
+  });
+
+  it("flags that period dates are needed rather than guessing a schedule", () => {
+    const award = makeFundingAward({ totalAmount: 20000, periodStart: null, periodEnd: null });
+    const result = calculatePeriodBudgetSummary(award, []);
+    expect(result.needsPeriodDates).toBe(true);
+    expect(result.expensesOverPeriod).toBeNull();
+    expect(result.remainingAfterExpenses).toBeNull();
+    expect(result.totalFunding).toBe(20000); // the total itself is still known and shown
   });
 });
 
@@ -256,7 +347,7 @@ describe("calculateFinancialSummary", () => {
   const asOf = new Date("2026-01-01T00:00:00.000Z");
 
   it("assembles committed spend, upcoming commitments, budget categories and recent transactions", () => {
-    const profile = makeProfile({ currentBalance: 4500, emergencyBuffer: 500 });
+    const profile = makeProfile({ currentBalance: 4500, emergencyBuffer: 500, balanceKnown: true });
     const incomes = [makeIncome({ source: "Student Finance", amount: 3000, date: "2026-01-29T00:00:00.000Z", frequency: "one_off" })];
     const expenses = [
       makeExpense({ name: "Rent", amount: 650, category: "rent", frequency: "monthly" }),
@@ -268,7 +359,10 @@ describe("calculateFinancialSummary", () => {
     );
     const goals = [makeGoal({ name: "Summer buffer", targetAmount: 600 })];
 
-    const summary = calculateFinancialSummary({ profile, incomes, expenses, transactions, goals }, asOf);
+    const summary = calculateFinancialSummary(
+      { profile, incomes, expenses, transactions, goals, fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
 
     expect(summary.nextIncome?.income.source).toBe("Student Finance");
     expect(summary.upcomingCommitments.map((c) => c.name)).toEqual(["Textbook", "Phone contract"]);
@@ -276,17 +370,52 @@ describe("calculateFinancialSummary", () => {
     expect(summary.recentTransactions).toHaveLength(8);
     expect(summary.recentTransactions[0].merchant).toBe("Shop 9");
     expect(summary.goals).toHaveLength(1);
+    expect(summary.horizonSource).toBe("next_income");
+    expect(summary.discretionaryCash).not.toBeNull();
   });
 
-  it("produces an honest empty-state summary for a brand new profile", () => {
-    const profile = makeProfile({ currentBalance: 0, emergencyBuffer: null });
-    const summary = calculateFinancialSummary({ profile, incomes: [], expenses: [], transactions: [], goals: [] }, asOf);
+  it("produces an honest empty-state summary for a brand new profile, never claiming a known £0 balance", () => {
+    const profile = makeProfile({ currentBalance: 0, emergencyBuffer: null, balanceKnown: false });
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [], expenses: [], transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
 
-    expect(summary.discretionaryCash).toBe(0);
-    expect(summary.safeWeeklySpend).toBe(0);
+    expect(summary.discretionaryCash).toBeNull();
+    expect(summary.safeWeeklySpend).toBeNull();
+    expect(summary.forecast30d).toBeNull();
     expect(summary.nextIncome).toBeNull();
     expect(summary.upcomingCommitments).toEqual([]);
     expect(summary.budgetCategories).toEqual([]);
     expect(summary.recentTransactions).toEqual([]);
+  });
+
+  it("keeps a total funding award out of live discretionary cash - the original annual-funding bug, at the summary level", () => {
+    const profile = makeProfile({ currentBalance: 500, balanceKnown: true });
+    const fundingAwards = [
+      makeFundingAward({ source: "Maintenance Loan", totalAmount: 20000, periodStart: "2025-09-01", periodEnd: "2026-06-30", scheduleKnown: false }),
+    ];
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [], expenses: [], transactions: [], goals: [], fundingAwards, incomeReceipts: [] },
+      asOf,
+    );
+
+    // The £20,000 award must never leak into live cash figures.
+    expect(summary.discretionaryCash).toBeCloseTo(500, 2);
+    expect(summary.fundingAwards).toHaveLength(1);
+    expect(summary.periodBudgets[0].totalFunding).toBe(20000);
+    // With no other income known, the horizon falls back to the award's period end, not a made-up instalment date.
+    expect(summary.horizonSource).toBe("funding_period_end");
+  });
+
+  it("surfaces recent income receipts without folding them into the summary's balance figure twice", () => {
+    const profile = makeProfile({ currentBalance: 3200, balanceKnown: true });
+    const incomeReceipts = [makeIncomeReceipt({ source: "Student Finance", amount: 3200, occurredOn: "2026-01-01", appliedToBalance: true })];
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [], expenses: [], transactions: [], goals: [], fundingAwards: [], incomeReceipts },
+      asOf,
+    );
+    expect(summary.recentIncomeReceipts).toHaveLength(1);
+    expect(summary.profile.currentBalance).toBe(3200);
   });
 });

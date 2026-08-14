@@ -7,6 +7,7 @@ export const AFFORDABILITY_STATUS_LABELS: Record<AffordabilityStatus, string> = 
   risky: "Risky",
   not_recommended: "Not recommended",
   cannot_afford: "Over budget",
+  unknown_balance: "Balance not provided",
 };
 
 export const AFFORDABILITY_STATUS_TONES: Record<AffordabilityStatus, BadgeTone> = {
@@ -15,4 +16,5 @@ export const AFFORDABILITY_STATUS_TONES: Record<AffordabilityStatus, BadgeTone> 
   risky: "caution",
   not_recommended: "warn",
   cannot_afford: "warn",
+  unknown_balance: "neutral",
 };
