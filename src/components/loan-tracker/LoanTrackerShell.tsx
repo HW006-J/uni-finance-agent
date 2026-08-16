@@ -3,10 +3,22 @@
 import { useMemo, useState } from "react";
 import { AppHeader } from "@/components/nav/AppHeader";
 import { Card } from "@/components/ui/Card";
-import { Button } from "@/components/ui/Button";
 import { StatTile } from "@/components/ui/StatTile";
 import { MoneyTipCard } from "@/components/dashboard/MoneyTipCard";
 import { LoanBalanceChart } from "./LoanBalanceChart";
+import { SliderField } from "./SliderField";
+import {
+  EXTRA_REPAYMENT_PRESETS,
+  EXTRA_REPAYMENT_SLIDER,
+  LOAN_BALANCE_PRESETS,
+  LOAN_BALANCE_SLIDER,
+  SALARY_GROWTH_SLIDER,
+  STARTING_SALARY_PRESETS,
+  STARTING_SALARY_SLIDER,
+  formatExtraRepaymentLabel,
+  formatGrowthPerYear,
+  formatSalaryPerYear,
+} from "./sliderInputs";
 import { DISCLAIMER } from "@/lib/brand";
 import { formatMoney, formatMoneyInputPreview, formatMoneyWhole, getLargeAmountNotice } from "@/lib/finance/format";
 import {
@@ -29,39 +41,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
       {children}
       {hint ? <span className="block text-xs font-medium text-ink-faint">{hint}</span> : null}
     </label>
-  );
-}
-
-function MoneyField({
-  label,
-  hint,
-  value,
-  onChange,
-  placeholder,
-}: {
-  label: string;
-  hint?: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-}) {
-  const parsed = Number.parseFloat(value);
-  const preview = formatMoneyInputPreview(value);
-  const largeNotice = Number.isFinite(parsed) ? getLargeAmountNotice(parsed) : null;
-  return (
-    <Field label={label} hint={hint}>
-      <input
-        type="number"
-        min={0}
-        inputMode="decimal"
-        placeholder={placeholder}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className={inputClass}
-      />
-      {preview ? <span className="block text-xs font-semibold text-ink-soft">= {preview}</span> : null}
-      {largeNotice ? <span className="block text-xs font-semibold text-caution-dark">{largeNotice}</span> : null}
-    </Field>
   );
 }
 
@@ -93,6 +72,8 @@ export function LoanTrackerShell() {
 
   const parsedBalance = Number.parseFloat(loanBalance);
   const parsedSalary = Number.parseFloat(startingSalary);
+  const loanBalanceLargeNotice = Number.isFinite(parsedBalance) ? getLargeAmountNotice(parsedBalance) : null;
+
   const hasValidInputs =
     courseStartDate.length > 0 &&
     Number.isFinite(parsedBalance) &&
@@ -204,11 +185,19 @@ export function LoanTrackerShell() {
               </div>
             ) : null}
 
-            <MoneyField
+            <SliderField
               label="Current/expected loan balance"
               value={loanBalance}
               onChange={setLoanBalance}
-              placeholder="e.g. 45000"
+              range={LOAN_BALANCE_SLIDER}
+              displayValue={formatMoneyInputPreview(loanBalance) ?? "Enter an amount"}
+              inputPrefix="£"
+              presets={LOAN_BALANCE_PRESETS}
+              belowSlider={
+                loanBalanceLargeNotice ? (
+                  <p className="text-xs font-semibold text-caution-dark">{loanBalanceLargeNotice}</p>
+                ) : null
+              }
             />
 
             <Field
@@ -222,44 +211,38 @@ export function LoanTrackerShell() {
               <input type="date" value={courseEndDate} onChange={(e) => setCourseEndDate(e.target.value)} className={inputClass} />
             </Field>
 
-            <MoneyField
+            <SliderField
               label="Expected starting salary"
               hint="Annual, before tax"
               value={startingSalary}
               onChange={setStartingSalary}
-              placeholder="e.g. 28000"
+              range={STARTING_SALARY_SLIDER}
+              displayValue={Number.isFinite(parsedSalary) ? formatSalaryPerYear(parsedSalary) : "Enter a salary"}
+              inputPrefix="£"
+              presets={STARTING_SALARY_PRESETS}
             />
 
-            <Field label="Expected annual salary growth" hint="A rough estimate is fine - you can change this">
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  step="0.1"
-                  value={salaryGrowthPercent}
-                  onChange={(e) => setSalaryGrowthPercent(e.target.value)}
-                  className={inputClass}
-                />
-                <span className="text-sm font-bold text-ink-soft">%/yr</span>
-              </div>
-            </Field>
+            <SliderField
+              label="Expected annual salary growth"
+              hint="A rough estimate is fine - you can change this"
+              value={salaryGrowthPercent}
+              onChange={setSalaryGrowthPercent}
+              range={SALARY_GROWTH_SLIDER}
+              displayValue={formatGrowthPerYear(Number.parseFloat(salaryGrowthPercent) || 0)}
+              inputSuffix="%"
+            />
 
-            <Field label="Extra repayment" hint="Optional - on top of what's normally taken from your pay.">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-bold text-ink-soft">£</span>
-                <input
-                  type="number"
-                  min={0}
-                  inputMode="decimal"
-                  value={extraMonthly}
-                  onChange={(e) => setExtraMonthly(e.target.value)}
-                  className={inputClass}
-                />
-                <span className="text-sm font-bold text-ink-soft">/mo</span>
-              </div>
-              <Button variant="secondary" className="mt-1 !px-3 !py-1.5 text-xs" onClick={() => setExtraMonthly(String(extraAmount + 50))}>
-                Try +£50/month
-              </Button>
-            </Field>
+            <SliderField
+              label="Extra repayment"
+              hint="Optional - on top of what's normally taken from your pay."
+              value={extraMonthly}
+              onChange={setExtraMonthly}
+              range={EXTRA_REPAYMENT_SLIDER}
+              displayValue={formatExtraRepaymentLabel(extraAmount)}
+              inputPrefix="£"
+              inputSuffix="/mo"
+              presets={EXTRA_REPAYMENT_PRESETS}
+            />
 
             <div>
               <button
