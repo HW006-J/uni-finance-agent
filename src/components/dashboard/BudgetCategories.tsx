@@ -24,7 +24,7 @@ export function BudgetCategories({ summary }: { summary: FinancialSummary }) {
                 </span>
                 <div>
                   <p className="text-sm font-bold text-ink">{CATEGORY_LABELS[c.category]}</p>
-                  <p className="text-xs text-ink-soft">{c.essential ? "Essential" : "Discretionary"}</p>
+                  <p className="text-xs text-ink-soft">{c.essential ? "Essential" : "Extra"}</p>
                 </div>
               </div>
               <div className="text-right">

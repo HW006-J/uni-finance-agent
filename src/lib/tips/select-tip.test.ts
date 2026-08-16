@@ -60,7 +60,7 @@ describe("buildTipQueue", () => {
   it("puts the highest-priority eligible contextual tip first", () => {
     const queue = buildTipQueue({ page: "loan_tracker" });
     expect(queue[0].trigger).toBe("loan_tracker_view");
-    expect(queue[0].id).toBe("repayments-income-contingent"); // priority 10, highest among loan_tracker_view tips
+    expect(queue[0].id).toBe("loan-not-like-bank-loan"); // priority 10, highest among loan_tracker_view tips
   });
 
   it("falls back to the general rotation with no contextual match", () => {
@@ -72,5 +72,29 @@ describe("buildTipQueue", () => {
   it("never returns duplicate tips", () => {
     const queue = buildTipQueue({ page: "loan_tracker" });
     expect(new Set(queue.map((t) => t.id)).size).toBe(queue.length);
+  });
+
+  it("surfaces the jobs, university-support and borrowing-caution tips ahead of the general rotation during a shortfall", () => {
+    const summary = summaryWith(
+      { currentBalance: 10, balanceKnown: true },
+      { expenses: [{ id: "e1", profileId: "p1", name: "Rent", amount: 900, category: "rent", frequency: "monthly", nextDueDate: null, active: true, createdAt: "", updatedAt: "" }] },
+    );
+    const queue = buildTipQueue({ page: "budget", summary });
+    const contextualIds = queue.filter((t) => t.trigger === "shortfall_projected").map((t) => t.id);
+    expect(contextualIds).toEqual(expect.arrayContaining(["find-student-work", "university-support", "high-cost-borrowing"]));
+    // Contextual tips come first, so none of them should be preceded by a general (untriggered) tip.
+    const firstGeneralIndex = queue.findIndex((t) => !t.trigger);
+    const lastContextualIndex = Math.max(...contextualIds.map((id) => queue.findIndex((t) => t.id === id)));
+    expect(lastContextualIndex).toBeLessThan(firstGeneralIndex);
+  });
+
+  it("has enough eligible tips in every context for 'Next tip' to genuinely rotate rather than repeat", () => {
+    const shortfallSummary = summaryWith(
+      { currentBalance: 10, balanceKnown: true },
+      { expenses: [{ id: "e1", profileId: "p1", name: "Rent", amount: 900, category: "rent", frequency: "monthly", nextDueDate: null, active: true, createdAt: "", updatedAt: "" }] },
+    );
+    expect(buildTipQueue({ page: "budget", summary: shortfallSummary }).length).toBeGreaterThan(3);
+    expect(buildTipQueue({ page: "loan_tracker" }).length).toBeGreaterThan(3);
+    expect(buildTipQueue({ page: "budget" }).length).toBeGreaterThan(3);
   });
 });

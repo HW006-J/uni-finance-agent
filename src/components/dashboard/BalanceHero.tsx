@@ -3,7 +3,7 @@ import { formatMoney } from "@/lib/finance/format";
 import type { FinancialSummary } from "@/lib/finance/engine";
 
 export function BalanceHero({ summary }: { summary: FinancialSummary }) {
-  const { profile, safeWeeklySpend, discretionaryCash, nextIncome } = summary;
+  const { profile, safeWeeklySpend, discretionaryCash, shortfallAmount, nextIncome } = summary;
   const balanceKnown = profile.balanceKnown;
 
   return (
@@ -35,9 +35,11 @@ export function BalanceHero({ summary }: { summary: FinancialSummary }) {
             {safeWeeklySpend !== null ? formatMoney(safeWeeklySpend, profile.currency) : "—"}
           </p>
           <p className="mt-2 text-xs font-medium text-brand-dark/70">
-            {discretionaryCash !== null
-              ? `${formatMoney(discretionaryCash, profile.currency)} discretionary before next income`
-              : "Add your current balance to see this"}
+            {shortfallAmount !== null
+              ? `Projected shortfall of ${formatMoney(shortfallAmount, profile.currency)} before next income`
+              : discretionaryCash !== null
+                ? `${formatMoney(discretionaryCash, profile.currency)} left before next income`
+                : "Add your current balance to see this"}
           </p>
         </div>
       </div>

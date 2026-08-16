@@ -82,6 +82,11 @@ const GOV_UK_WRITE_OFF: RuleSource = {
   url: "https://www.gov.uk/government/publications/student-loans-a-guide-to-terms-and-conditions/student-loans-a-guide-to-terms-and-conditions-2026-to-2027",
 };
 
+const GOV_UK_WHICH_PLAN: RuleSource = {
+  label: "GOV.UK — Which repayment plan you're on",
+  url: "https://www.gov.uk/repaying-your-student-loan/which-repayment-plan-you-are-on",
+};
+
 export const STUDENT_LOAN_RULES: Record<LoanPlan, StudentLoanRuleSet> = {
   plan2: {
     plan: "plan2",
@@ -152,4 +157,28 @@ export function resolvePlan2AnnualInterestRate(model: Plan2InterestModel, annual
 /** Resolves the annual interest rate for any supported plan/interest model. `annualSalary: null` means "while studying" for Plan 2, or is ignored for Plan 5's flat rate. */
 export function resolveAnnualInterestRate(rules: StudentLoanRuleSet, annualSalary: number | null): number {
   return rules.interest.kind === "flat" ? rules.interest.rate : resolvePlan2AnnualInterestRate(rules.interest, annualSalary);
+}
+
+/**
+ * The English-undergraduate course-start cutoff between Plan 2 and Plan 5,
+ * per GOV.UK: courses started on or after this date are Plan 5; courses
+ * started before it (from 1 September 2012) are Plan 2. Verified against
+ * the live GOV.UK "which repayment plan you're on" page - see
+ * GOV_UK_WHICH_PLAN above. Bump `lastVerified` on the rule sets if this ever
+ * changes.
+ */
+export const PLAN5_COURSE_START_CUTOFF = "2023-08-01";
+
+export const PLAN_INFERENCE_SOURCE = GOV_UK_WHICH_PLAN;
+
+/**
+ * Infers the likely repayment plan for an English undergraduate purely from
+ * their course start date, so a student never has to already know "Plan 2"
+ * or "Plan 5" to use the tracker. Always overridable - this is a starting
+ * point, not a substitute for the student's actual Student Finance account.
+ */
+export function inferPlanFromCourseStart(courseStartDateIso: string): LoanPlan {
+  const start = new Date(courseStartDateIso);
+  const cutoff = new Date(PLAN5_COURSE_START_CUTOFF);
+  return start >= cutoff ? "plan5" : "plan2";
 }

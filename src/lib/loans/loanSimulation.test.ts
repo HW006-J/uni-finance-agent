@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { deriveFirstRepaymentDueDate, simulateLoan, type LoanSimulationInput } from "./loanSimulation";
+import {
+  compareLoanSimulations,
+  deriveFirstRepaymentDueDate,
+  formatMonthsDuration,
+  simulateLoan,
+  type LoanSimulationInput,
+} from "./loanSimulation";
 
 const baseInput: LoanSimulationInput = {
   plan: "plan5",
@@ -159,5 +165,77 @@ describe("simulateLoan - determinism", () => {
     const a = simulateLoan({ ...baseInput });
     const b = simulateLoan({ ...baseInput });
     expect(a).toEqual(b);
+  });
+});
+
+describe("compareLoanSimulations", () => {
+  it("reports months earlier when extra repayments bring forward a payoff that would already have happened", () => {
+    const baseline = simulateLoan({ plan: "plan5", startingBalance: 5_000, firstRepaymentDueDate: "2027-04-06", startingSalary: 45_000, salaryGrowthRate: 0 });
+    const withExtra = simulateLoan({ plan: "plan5", startingBalance: 5_000, firstRepaymentDueDate: "2027-04-06", startingSalary: 45_000, salaryGrowthRate: 0, voluntaryMonthlyRepayment: 200 });
+
+    const comparison = compareLoanSimulations(baseline, withExtra);
+    expect(comparison.baselineOutcome).toBe("paid_off");
+    expect(comparison.withExtraOutcome).toBe("paid_off");
+    expect(comparison.monthsEarlier).not.toBeNull();
+    expect(comparison.monthsEarlier!).toBeGreaterThan(0);
+    expect(comparison.writtenOffReducedBy).toBeNull();
+  });
+
+  it("reports a reduced write-off amount when extra repayments still don't fully clear the loan", () => {
+    const baseline = simulateLoan({ plan: "plan5", startingBalance: 200_000, firstRepaymentDueDate: "2027-04-06", startingSalary: 26_000, salaryGrowthRate: 0 });
+    const withExtra = simulateLoan({ plan: "plan5", startingBalance: 200_000, firstRepaymentDueDate: "2027-04-06", startingSalary: 26_000, salaryGrowthRate: 0, voluntaryMonthlyRepayment: 100 });
+
+    const comparison = compareLoanSimulations(baseline, withExtra);
+    expect(comparison.baselineOutcome).toBe("written_off");
+    expect(comparison.withExtraOutcome).toBe("written_off");
+    expect(comparison.monthsEarlier).toBeNull();
+    expect(comparison.writtenOffReducedBy).not.toBeNull();
+    expect(comparison.writtenOffReducedBy!).toBeGreaterThan(0);
+  });
+
+  it("computes the difference in total personally repaid and total interest", () => {
+    const baseline = simulateLoan({ ...baseInput, plan: "plan5", startingBalance: 5_000, startingSalary: 45_000, salaryGrowthRate: 0 });
+    const withExtra = simulateLoan({ ...baseInput, plan: "plan5", startingBalance: 5_000, startingSalary: 45_000, salaryGrowthRate: 0, voluntaryMonthlyRepayment: 200 });
+
+    const comparison = compareLoanSimulations(baseline, withExtra);
+    expect(comparison.totalPersonallyRepaidDifference).toBeCloseTo(withExtra.totalRepaid - baseline.totalRepaid, 2);
+    expect(comparison.totalInterestDifference).toBeCloseTo(withExtra.totalInterestAdded - baseline.totalInterestAdded, 2);
+    expect(comparison.totalInterestDifference).toBeLessThanOrEqual(0);
+  });
+
+  it("is deterministic for identical inputs", () => {
+    const baseline = simulateLoan({ ...baseInput });
+    const withExtra = simulateLoan({ ...baseInput, voluntaryMonthlyRepayment: 100 });
+    expect(compareLoanSimulations(baseline, withExtra)).toEqual(compareLoanSimulations(baseline, withExtra));
+  });
+});
+
+describe("formatMonthsDuration", () => {
+  it("formats whole years with no remainder months", () => {
+    expect(formatMonthsDuration(24)).toBe("2 years");
+  });
+
+  it("formats a single year correctly (no plural)", () => {
+    expect(formatMonthsDuration(12)).toBe("1 year");
+  });
+
+  it("formats years and months together", () => {
+    expect(formatMonthsDuration(25)).toBe("2 years 1 month");
+  });
+
+  it("formats less than a year as months only", () => {
+    expect(formatMonthsDuration(7)).toBe("7 months");
+  });
+
+  it("formats a single month correctly (no plural)", () => {
+    expect(formatMonthsDuration(1)).toBe("1 month");
+  });
+
+  it("formats zero as 'less than a month'", () => {
+    expect(formatMonthsDuration(0)).toBe("less than a month");
+  });
+
+  it("rounds and never goes negative", () => {
+    expect(formatMonthsDuration(-3)).toBe("less than a month");
   });
 });

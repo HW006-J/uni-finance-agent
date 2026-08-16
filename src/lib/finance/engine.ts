@@ -488,6 +488,47 @@ export function calculatePeriodBudgetSummary(award: FundingAward, expenses: Expe
 }
 
 // ---------------------------------------------------------------------------
+// Shortfall insight - a plain-language-ready, deterministic answer to
+// "am I projected to run short, and by roughly how much per week would I
+// need to cut back to avoid it". Gemini never computes this number; the UI
+// reads it straight off the summary.
+// ---------------------------------------------------------------------------
+
+export interface ShortfallInsight {
+  /** True only when discretionary cash is negative under a known balance and a confirmed (non-default) horizon. */
+  isShortfall: boolean;
+  /** Positive amount the student is projected to be short by. Null when not in a shortfall or inputs are unknown. */
+  shortfallAmount: number | null;
+  /** Deterministic weekly spending reduction that would close the shortfall by the horizon date. Null under the same conditions as shortfallAmount. */
+  suggestedWeeklyReduction: number | null;
+}
+
+/**
+ * Only meaningful once the student has told us a real balance AND we have a
+ * confirmed horizon to plan against (an explicit date, next income, or a
+ * funding period end) - the unconfirmed `default` horizon isn't a real
+ * deadline, so a reduction-per-week figure against it would be invented.
+ */
+export function calculateShortfallInsight(
+  discretionaryCash: number | null,
+  horizonDays: number,
+  horizonSource: HorizonSource,
+): ShortfallInsight {
+  const horizonConfirmed = horizonSource !== "default";
+  if (discretionaryCash === null || !horizonConfirmed || discretionaryCash >= 0) {
+    return { isShortfall: false, shortfallAmount: null, suggestedWeeklyReduction: null };
+  }
+
+  const shortfallAmount = round2(-discretionaryCash);
+  const weeks = Math.max(horizonDays / 7, 1 / 7);
+  return {
+    isShortfall: true,
+    shortfallAmount,
+    suggestedWeeklyReduction: round2(shortfallAmount / weeks),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard-facing aggregate summary
 // ---------------------------------------------------------------------------
 
@@ -513,6 +554,10 @@ export interface FinancialSummary {
   /** Null when profile.balanceKnown is false - the student hasn't told us a balance yet, so a live cashflow figure would be misleading. */
   discretionaryCash: number | null;
   safeWeeklySpend: number | null;
+  /** Positive amount the student is projected to run short by. Null when not in a shortfall or inputs are unknown - see calculateShortfallInsight. */
+  shortfallAmount: number | null;
+  /** Deterministic weekly spending reduction that would close the shortfall by the horizon date. */
+  suggestedWeeklyReduction: number | null;
   horizonDays: number;
   horizonSource: HorizonSource;
   horizonDate: string;
@@ -565,13 +610,17 @@ export function calculateFinancialSummary(state: FinancialState, asOf: Date = ne
   const engineInput = { profile, expenses, incomes, fundingAwards, asOf };
   const horizon = calculateHorizon(engineInput, asOf);
   const periodBudgets = fundingAwards.map((award) => calculatePeriodBudgetSummary(award, expenses));
+  const discretionaryCash = profile.balanceKnown ? calculateDiscretionaryCash(engineInput) : null;
+  const shortfall = calculateShortfallInsight(discretionaryCash, horizon.days, horizon.source);
 
   return {
     profile,
     committedSpend: calculateCommittedSpend(expenses),
     essentialSpend: calculateExpectedEssentialSpend(expenses),
-    discretionaryCash: profile.balanceKnown ? calculateDiscretionaryCash(engineInput) : null,
+    discretionaryCash,
     safeWeeklySpend: profile.balanceKnown ? calculateSafeWeeklySpend(engineInput) : null,
+    shortfallAmount: shortfall.shortfallAmount,
+    suggestedWeeklyReduction: shortfall.suggestedWeeklyReduction,
     horizonDays: horizon.days,
     horizonSource: horizon.source,
     horizonDate: horizon.horizonDate,

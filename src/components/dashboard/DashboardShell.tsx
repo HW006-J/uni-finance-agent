@@ -18,7 +18,7 @@ import { Card } from "@/components/ui/Card";
 import { StatTile } from "@/components/ui/StatTile";
 import { AppHeader } from "@/components/nav/AppHeader";
 import { DISCLAIMER } from "@/lib/brand";
-import { formatMoney } from "@/lib/finance/format";
+import { formatMoney, formatMoneyWhole } from "@/lib/finance/format";
 import type { FinancialSummary } from "@/lib/finance/engine";
 import type { ChatTurn } from "@/lib/ai/provider";
 
@@ -221,11 +221,19 @@ export function DashboardShell({
               <BalanceHero summary={summary} />
               <MoneyTipCard context={{ page: "budget", summary }} />
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <StatTile
-                  label="Discretionary remaining"
-                  value={summary.discretionaryCash !== null ? formatMoney(summary.discretionaryCash, summary.profile.currency) : "—"}
-                  sublabel="before your next income"
-                />
+                {summary.shortfallAmount !== null ? (
+                  <StatTile
+                    label="Projected shortfall"
+                    value={formatMoney(summary.shortfallAmount, summary.profile.currency)}
+                    sublabel="before your next maintenance payment"
+                  />
+                ) : (
+                  <StatTile
+                    label="Money left after planned spending"
+                    value={summary.discretionaryCash !== null ? formatMoney(summary.discretionaryCash, summary.profile.currency) : "—"}
+                    sublabel={summary.discretionaryCash !== null ? "before your next income" : "Add your current balance to see this"}
+                  />
+                )}
                 <StatTile
                   label="Committed spend"
                   value={`${formatMoney(summary.committedSpend.weekly, summary.profile.currency)}/wk`}
@@ -237,6 +245,16 @@ export function DashboardShell({
                   sublabel="the needs inside committed spend"
                 />
               </div>
+              {summary.suggestedWeeklyReduction !== null ? (
+                <Card className="border-caution/30 bg-caution-light p-5">
+                  <p className="text-sm font-bold text-caution-dark">To make your money last</p>
+                  <p className="mt-1 text-sm font-medium text-caution-dark">
+                    Try reducing spending by about{" "}
+                    <span className="font-extrabold">{formatMoneyWhole(summary.suggestedWeeklyReduction, summary.profile.currency)}/week</span>{" "}
+                    until your next payment.
+                  </p>
+                </Card>
+              ) : null}
               <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
                 <BudgetCategories summary={summary} />
                 <UpcomingCommitments summary={summary} />

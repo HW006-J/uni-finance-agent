@@ -8,6 +8,7 @@ import {
   calculateHorizonDays,
   calculatePeriodBudgetSummary,
   calculateSafeWeeklySpend,
+  calculateShortfallInsight,
   checkAffordability,
   findNextIncome,
   forecastBalance,
@@ -417,5 +418,71 @@ describe("calculateFinancialSummary", () => {
     );
     expect(summary.recentIncomeReceipts).toHaveLength(1);
     expect(summary.profile.currentBalance).toBe(3200);
+  });
+
+  it("surfaces a shortfall and a suggested weekly reduction when spending outpaces the balance before the next income", () => {
+    const profile = makeProfile({ currentBalance: 100, balanceKnown: true });
+    const incomes = [makeIncome({ source: "Wages", amount: 50, date: "2026-01-08T00:00:00.000Z", frequency: "one_off" })];
+    const expenses = [makeExpense({ name: "Rent", amount: 700, category: "rent", frequency: "monthly", nextDueDate: "2026-01-03T00:00:00.000Z" })];
+    const summary = calculateFinancialSummary(
+      { profile, incomes, expenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+
+    expect(summary.discretionaryCash).toBeLessThan(0);
+    expect(summary.shortfallAmount).toBe(-summary.discretionaryCash!);
+    expect(summary.suggestedWeeklyReduction).toBeGreaterThan(0);
+  });
+
+  it("reports no shortfall for a healthy budget", () => {
+    const profile = makeProfile({ currentBalance: 2000, balanceKnown: true });
+    const incomes = [makeIncome({ source: "Wages", amount: 500, date: "2026-01-08T00:00:00.000Z", frequency: "one_off" })];
+    const summary = calculateFinancialSummary(
+      { profile, incomes, expenses: [], transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+
+    expect(summary.shortfallAmount).toBeNull();
+    expect(summary.suggestedWeeklyReduction).toBeNull();
+  });
+});
+
+describe("calculateShortfallInsight", () => {
+  it("returns no shortfall when the balance (discretionary cash) is unknown", () => {
+    expect(calculateShortfallInsight(null, 14, "next_income")).toEqual({
+      isShortfall: false,
+      shortfallAmount: null,
+      suggestedWeeklyReduction: null,
+    });
+  });
+
+  it("returns no shortfall when discretionary cash is zero or positive", () => {
+    expect(calculateShortfallInsight(0, 14, "next_income").isShortfall).toBe(false);
+    expect(calculateShortfallInsight(120, 14, "next_income").isShortfall).toBe(false);
+  });
+
+  it("returns no shortfall when the horizon is only the unconfirmed default window", () => {
+    const result = calculateShortfallInsight(-200, 30, "default");
+    expect(result).toEqual({ isShortfall: false, shortfallAmount: null, suggestedWeeklyReduction: null });
+  });
+
+  it("computes a positive shortfall amount and a weekly reduction to close it by the horizon", () => {
+    // £1,675 short over ~20.7 weeks (145 days) -> about £81/week, matching the PR's manual test scenario.
+    const result = calculateShortfallInsight(-1675, 145, "next_income");
+    expect(result.isShortfall).toBe(true);
+    expect(result.shortfallAmount).toBe(1675);
+    expect(result.suggestedWeeklyReduction).toBeCloseTo(80.86, 1);
+  });
+
+  it("never returns a negative shortfall amount or reduction", () => {
+    const result = calculateShortfallInsight(-42.5, 7, "explicit");
+    expect(result.shortfallAmount).toBeGreaterThan(0);
+    expect(result.suggestedWeeklyReduction).toBeGreaterThan(0);
+  });
+
+  it("is deterministic for identical inputs", () => {
+    const a = calculateShortfallInsight(-500, 21, "explicit");
+    const b = calculateShortfallInsight(-500, 21, "explicit");
+    expect(a).toEqual(b);
   });
 });

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  PLAN5_COURSE_START_CUTOFF,
   STUDENT_LOAN_RULES,
   getStudentLoanRules,
+  inferPlanFromCourseStart,
   resolveAnnualInterestRate,
   resolvePlan2AnnualInterestRate,
   type Plan2InterestModel,
@@ -77,5 +79,31 @@ describe("resolvePlan2AnnualInterestRate", () => {
 
   it("returns the same result for identical inputs (deterministic)", () => {
     expect(resolvePlan2AnnualInterestRate(model, 35_000)).toBe(resolvePlan2AnnualInterestRate(model, 35_000));
+  });
+});
+
+describe("inferPlanFromCourseStart", () => {
+  it("matches the documented GOV.UK cutoff constant", () => {
+    expect(PLAN5_COURSE_START_CUTOFF).toBe("2023-08-01");
+  });
+
+  it("infers Plan 5 for a course starting on the cutoff date", () => {
+    expect(inferPlanFromCourseStart("2023-08-01")).toBe("plan5");
+  });
+
+  it("infers Plan 5 for a course starting well after the cutoff", () => {
+    expect(inferPlanFromCourseStart("2026-09-15")).toBe("plan5");
+  });
+
+  it("infers Plan 2 for a course starting the day before the cutoff", () => {
+    expect(inferPlanFromCourseStart("2023-07-31")).toBe("plan2");
+  });
+
+  it("infers Plan 2 for a course starting well before the cutoff", () => {
+    expect(inferPlanFromCourseStart("2019-09-01")).toBe("plan2");
+  });
+
+  it("is deterministic for identical inputs", () => {
+    expect(inferPlanFromCourseStart("2024-01-01")).toBe(inferPlanFromCourseStart("2024-01-01"));
   });
 });

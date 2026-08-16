@@ -174,3 +174,64 @@ export function simulateLoan(input: LoanSimulationInput): LoanSimulationResult {
     totalRepaid: round2(totalStatutoryRepaid + totalVoluntaryRepaid),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Extra-repayment comparison - a neutral, deterministic answer to "is the
+// extra repayment actually doing anything?". Never frames overpaying as
+// inherently good or bad - see the module doc comment.
+// ---------------------------------------------------------------------------
+
+export type LoanOutcome = "paid_off" | "written_off";
+
+export interface LoanComparison {
+  baselineOutcome: LoanOutcome;
+  withExtraOutcome: LoanOutcome;
+  /** Whole months the loan is cleared earlier under the extra repayment. Only set when both scenarios reach £0 (both "paid_off"). */
+  monthsEarlier: number | null;
+  /** withExtra.totalRepaid - baseline.totalRepaid - how much more (or less) the student personally pays in overall. */
+  totalPersonallyRepaidDifference: number;
+  /** withExtra.totalInterestAdded - baseline.totalInterestAdded. */
+  totalInterestDifference: number;
+  /** How much smaller the amount written off ends up being. Only set when both scenarios still end in write-off. */
+  writtenOffReducedBy: number | null;
+}
+
+/**
+ * Compares two simulations that share the same inputs except for the extra
+ * (voluntary) monthly repayment. Pure arithmetic over already-computed
+ * simulation results - no new financial modelling happens here.
+ */
+export function compareLoanSimulations(baseline: LoanSimulationResult, withExtra: LoanSimulationResult): LoanComparison {
+  const baselineOutcome: LoanOutcome = baseline.payoffDate ? "paid_off" : "written_off";
+  const withExtraOutcome: LoanOutcome = withExtra.payoffDate ? "paid_off" : "written_off";
+
+  const monthsEarlier =
+    baselineOutcome === "paid_off" && withExtraOutcome === "paid_off"
+      ? baseline.months.length - withExtra.months.length
+      : null;
+
+  const writtenOffReducedBy =
+    baselineOutcome === "written_off" && withExtraOutcome === "written_off"
+      ? round2((baseline.balanceAtWriteOff ?? 0) - (withExtra.balanceAtWriteOff ?? 0))
+      : null;
+
+  return {
+    baselineOutcome,
+    withExtraOutcome,
+    monthsEarlier,
+    totalPersonallyRepaidDifference: round2(withExtra.totalRepaid - baseline.totalRepaid),
+    totalInterestDifference: round2(withExtra.totalInterestAdded - baseline.totalInterestAdded),
+    writtenOffReducedBy,
+  };
+}
+
+/** Plain "N years M months" / "N months" duration string for a whole number of months. Returns "less than a month" for 0. */
+export function formatMonthsDuration(totalMonths: number): string {
+  const months = Math.max(0, Math.round(totalMonths));
+  if (months === 0) return "less than a month";
+  const years = Math.floor(months / 12);
+  const remainderMonths = months % 12;
+  const yearPart = years > 0 ? `${years} year${years === 1 ? "" : "s"}` : "";
+  const monthPart = remainderMonths > 0 ? `${remainderMonths} month${remainderMonths === 1 ? "" : "s"}` : "";
+  return [yearPart, monthPart].filter(Boolean).join(" ");
+}
