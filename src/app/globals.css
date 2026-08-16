@@ -68,3 +68,63 @@ body {
 .animate-pop-in {
   animation: pop-in 0.22s ease-out both;
 }
+
+/* Chunky, tactile range slider - used by Loan Tracker projection inputs. */
+.slider-chunky {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--color-cream-dark);
+  outline: none;
+  cursor: pointer;
+}
+
+.slider-chunky::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--color-brand);
+  border: 3px solid var(--color-surface);
+  box-shadow:
+    0 1px 2px rgba(36, 31, 24, 0.15),
+    0 2px 6px rgba(36, 31, 24, 0.12);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+
+.slider-chunky::-webkit-slider-thumb:hover {
+  transform: scale(1.08);
+}
+
+.slider-chunky:focus-visible::-webkit-slider-thumb {
+  outline: 3px solid var(--color-brand-dark);
+  outline-offset: 2px;
+}
+
+.slider-chunky::-moz-range-track {
+  height: 12px;
+  border-radius: 999px;
+  background: transparent;
+  border: none;
+}
+
+.slider-chunky::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--color-brand);
+  border: 3px solid var(--color-surface);
+  box-shadow:
+    0 1px 2px rgba(36, 31, 24, 0.15),
+    0 2px 6px rgba(36, 31, 24, 0.12);
+  cursor: pointer;
+}
+
+.slider-chunky:focus-visible::-moz-range-thumb {
+  outline: 3px solid var(--color-brand-dark);
+  outline-offset: 2px;
+}
