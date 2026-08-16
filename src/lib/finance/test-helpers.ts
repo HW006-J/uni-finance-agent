@@ -1,4 +1,4 @@
-import type { Expense, Goal, Income, Profile, Transaction } from "@/types/finance";
+import type { Expense, FundingAward, Goal, Income, IncomeReceipt, Profile, Transaction } from "@/types/finance";
 
 let counter = 0;
 function nextId(prefix: string): string {
@@ -12,8 +12,42 @@ export function makeProfile(overrides: Partial<Profile> = {}): Profile {
     currency: "GBP",
     currentBalance: 0,
     emergencyBuffer: null,
+    balanceKnown: false,
+    balanceUpdatedAt: null,
+    budgetHorizonDate: null,
+    budgetHorizonNote: null,
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+export function makeFundingAward(overrides: Partial<FundingAward> = {}): FundingAward {
+  return {
+    id: nextId("award"),
+    profileId: "profile-1",
+    source: "Maintenance Loan",
+    totalAmount: 0,
+    periodStart: null,
+    periodEnd: null,
+    scheduleKnown: false,
+    notes: null,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+export function makeIncomeReceipt(overrides: Partial<IncomeReceipt> = {}): IncomeReceipt {
+  return {
+    id: nextId("receipt"),
+    profileId: "profile-1",
+    source: "Student Finance",
+    amount: 0,
+    occurredOn: "2026-01-01",
+    notes: null,
+    appliedToBalance: false,
+    createdAt: "2026-01-01T00:00:00.000Z",
     ...overrides,
   };
 }

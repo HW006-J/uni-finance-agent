@@ -3,8 +3,10 @@ import type {
   Currency,
   Expense,
   FinancialState,
+  FundingAward,
   Goal,
   Income,
+  IncomeReceipt,
   Profile,
   RecurrenceFrequency,
   SpendCategory,
@@ -22,8 +24,36 @@ interface ProfileRow {
   currency: Currency;
   current_balance: string | number;
   emergency_buffer: string | number | null;
+  balance_known: boolean;
+  balance_updated_at: string | null;
+  budget_horizon_date: string | null;
+  budget_horizon_note: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface FundingAwardRow {
+  id: string;
+  profile_id: string;
+  source: string;
+  total_amount: string | number;
+  period_start: string | null;
+  period_end: string | null;
+  schedule_known: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+interface IncomeReceiptRow {
+  id: string;
+  profile_id: string;
+  source: string;
+  amount: string | number;
+  occurred_on: string;
+  notes: string | null;
+  applied_to_balance: boolean;
+  created_at: string;
 }
 
 interface IncomeRow {
@@ -80,8 +110,40 @@ function toProfile(row: ProfileRow): Profile {
     currency: row.currency,
     currentBalance: num(row.current_balance),
     emergencyBuffer: row.emergency_buffer === null ? null : num(row.emergency_buffer),
+    balanceKnown: row.balance_known,
+    balanceUpdatedAt: row.balance_updated_at,
+    budgetHorizonDate: row.budget_horizon_date,
+    budgetHorizonNote: row.budget_horizon_note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  };
+}
+
+function toFundingAward(row: FundingAwardRow): FundingAward {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    source: row.source,
+    totalAmount: num(row.total_amount),
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    scheduleKnown: row.schedule_known,
+    notes: row.notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+function toIncomeReceipt(row: IncomeReceiptRow): IncomeReceipt {
+  return {
+    id: row.id,
+    profileId: row.profile_id,
+    source: row.source,
+    amount: num(row.amount),
+    occurredOn: row.occurred_on,
+    notes: row.notes,
+    appliedToBalance: row.applied_to_balance,
+    createdAt: row.created_at,
   };
 }
 
@@ -150,19 +212,29 @@ function raise(context: string, error: { message: string } | null): never {
 export async function getFinancialState(profileId: string): Promise<FinancialState> {
   const supabase = getSupabaseClient();
 
-  const [profileRes, incomesRes, expensesRes, transactionsRes, goalsRes] = await Promise.all([
-    supabase.from("profiles").select("*").eq("id", profileId).single(),
-    supabase.from("incomes").select("*").eq("profile_id", profileId).order("date", { ascending: true }),
-    supabase.from("expenses").select("*").eq("profile_id", profileId).eq("active", true).order("created_at", { ascending: true }),
-    supabase.from("transactions").select("*").eq("profile_id", profileId).order("date", { ascending: false }).limit(50),
-    supabase.from("goals").select("*").eq("profile_id", profileId).order("created_at", { ascending: true }),
-  ]);
+  const [profileRes, incomesRes, expensesRes, transactionsRes, goalsRes, fundingAwardsRes, incomeReceiptsRes] =
+    await Promise.all([
+      supabase.from("profiles").select("*").eq("id", profileId).single(),
+      supabase.from("incomes").select("*").eq("profile_id", profileId).order("date", { ascending: true }),
+      supabase.from("expenses").select("*").eq("profile_id", profileId).eq("active", true).order("created_at", { ascending: true }),
+      supabase.from("transactions").select("*").eq("profile_id", profileId).order("date", { ascending: false }).limit(50),
+      supabase.from("goals").select("*").eq("profile_id", profileId).order("created_at", { ascending: true }),
+      supabase.from("funding_awards").select("*").eq("profile_id", profileId).order("created_at", { ascending: true }),
+      supabase
+        .from("income_receipts")
+        .select("*")
+        .eq("profile_id", profileId)
+        .order("occurred_on", { ascending: false })
+        .limit(50),
+    ]);
 
   if (profileRes.error) raise("Failed to load profile", profileRes.error);
   if (incomesRes.error) raise("Failed to load incomes", incomesRes.error);
   if (expensesRes.error) raise("Failed to load expenses", expensesRes.error);
   if (transactionsRes.error) raise("Failed to load transactions", transactionsRes.error);
   if (goalsRes.error) raise("Failed to load goals", goalsRes.error);
+  if (fundingAwardsRes.error) raise("Failed to load funding awards", fundingAwardsRes.error);
+  if (incomeReceiptsRes.error) raise("Failed to load income receipts", incomeReceiptsRes.error);
 
   return {
     profile: toProfile(profileRes.data as ProfileRow),
@@ -170,6 +242,8 @@ export async function getFinancialState(profileId: string): Promise<FinancialSta
     expenses: (expensesRes.data as ExpenseRow[]).map(toExpense),
     transactions: (transactionsRes.data as TransactionRow[]).map(toTransaction),
     goals: (goalsRes.data as GoalRow[]).map(toGoal),
+    fundingAwards: (fundingAwardsRes.data as FundingAwardRow[]).map(toFundingAward),
+    incomeReceipts: (incomeReceiptsRes.data as IncomeReceiptRow[]).map(toIncomeReceipt),
   };
 }
 
@@ -191,11 +265,27 @@ export async function setCurrentBalance(profileId: string, amount: number): Prom
   const supabase = getSupabaseClient();
   const { data, error } = await supabase
     .from("profiles")
-    .update({ current_balance: amount })
+    .update({ current_balance: amount, balance_known: true, balance_updated_at: new Date().toISOString() })
     .eq("id", profileId)
     .select("*")
     .single();
   if (error) raise("Failed to update balance", error);
+  return toProfile(data as ProfileRow);
+}
+
+export async function setBudgetHorizon(
+  profileId: string,
+  date: string | null,
+  note: string | null,
+): Promise<Profile> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase
+    .from("profiles")
+    .update({ budget_horizon_date: date, budget_horizon_note: note })
+    .eq("id", profileId)
+    .select("*")
+    .single();
+  if (error) raise("Failed to set budget horizon", error);
   return toProfile(data as ProfileRow);
 }
 
@@ -298,6 +388,102 @@ export async function logTransaction(profileId: string, input: LogTransactionInp
   if (profileError) raise("Failed to reload profile after transaction", profileError);
 
   return { transaction, profile: toProfile(profileRow as ProfileRow) };
+}
+
+export interface UpsertFundingAwardInput {
+  source: string;
+  totalAmount: number;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  scheduleKnown?: boolean;
+  notes?: string | null;
+}
+
+/**
+ * Insert/update a TOTAL funding award for a period (matched by source name,
+ * case-insensitive). Never touches `current_balance` or `incomes` - this is
+ * purely the informational period-total record.
+ */
+export async function recordFundingAward(profileId: string, input: UpsertFundingAwardInput): Promise<FundingAward> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("upsert_funding_award", {
+    p_profile_id: profileId,
+    p_source: input.source,
+    p_total_amount: input.totalAmount,
+    p_period_start: input.periodStart ?? null,
+    p_period_end: input.periodEnd ?? null,
+    p_schedule_known: input.scheduleKnown ?? false,
+    p_notes: input.notes ?? null,
+  });
+  if (error) raise("Failed to record funding award", error);
+  const row = (data as FundingAwardRow[])[0];
+  return toFundingAward(row);
+}
+
+export interface RecordIncomeReceivedInput {
+  source: string;
+  amount: number;
+  occurredOn?: string;
+  notes?: string | null;
+}
+
+export interface RecordIncomeReceivedResult {
+  receipt: IncomeReceipt;
+  profile: Profile;
+}
+
+/**
+ * Records a payment the student says has actually arrived. Only folds it
+ * into `current_balance` when the balance was already known beforehand -
+ * see the migration comment on `record_income_received` for why guessing
+ * the starting balance would be wrong.
+ */
+export async function recordIncomeReceived(
+  profileId: string,
+  input: RecordIncomeReceivedInput,
+): Promise<RecordIncomeReceivedResult> {
+  const supabase = getSupabaseClient();
+  const { data, error } = await supabase.rpc("record_income_received", {
+    p_profile_id: profileId,
+    p_source: input.source,
+    p_amount: input.amount,
+    p_occurred_on: input.occurredOn ?? new Date().toISOString().slice(0, 10),
+    p_notes: input.notes ?? null,
+  });
+  if (error) raise("Failed to record income received", error);
+  const row = (
+    data as {
+      receipt_id: string;
+      receipt_source: string;
+      receipt_amount: string | number;
+      receipt_occurred_on: string;
+      receipt_notes: string | null;
+      receipt_applied_to_balance: boolean;
+      receipt_created_at: string;
+      profile_balance_known: boolean;
+      profile_current_balance: string | number;
+    }[]
+  )[0];
+
+  const receipt: IncomeReceipt = {
+    id: row.receipt_id,
+    profileId,
+    source: row.receipt_source,
+    amount: num(row.receipt_amount),
+    occurredOn: row.receipt_occurred_on,
+    notes: row.receipt_notes,
+    appliedToBalance: row.receipt_applied_to_balance,
+    createdAt: row.receipt_created_at,
+  };
+
+  const { data: profileRow, error: profileError } = await supabase
+    .from("profiles")
+    .select("*")
+    .eq("id", profileId)
+    .single();
+  if (profileError) raise("Failed to reload profile after income receipt", profileError);
+
+  return { receipt, profile: toProfile(profileRow as ProfileRow) };
 }
 
 export interface UpsertGoalInput {

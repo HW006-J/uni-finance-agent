@@ -14,8 +14,10 @@
 import type {
   Expense,
   FinancialState,
+  FundingAward,
   Goal,
   Income,
+  IncomeReceipt,
   Profile,
   RecurrenceFrequency,
   SpendCategory,
@@ -221,17 +223,72 @@ export function findNextIncome(incomes: Income[], asOf: Date = new Date()): Next
   };
 }
 
-/** Days until the next known income, or a default planning horizon if none is known. */
-export function calculateHorizonDays(incomes: Income[], asOf: Date = new Date()): number {
-  const next = findNextIncome(incomes, asOf);
-  if (!next) return DEFAULT_HORIZON_DAYS;
-  return Math.max(1, diffDays(new Date(next.occursOn), asOf));
+/**
+ * The budgeting horizon - "how far ahead does this plan reach" - is picked
+ * by a clear priority so the AI/engine never invents a date:
+ *   1. an explicit "must last until <date>" horizon the student stated;
+ *   2. the next known income/maintenance-loan instalment;
+ *   3. the end of a funding award period that covers the current date;
+ *   4. otherwise a default planning window (informational only - the UI
+ *      should make clear this wasn't confirmed by the student).
+ */
+export type HorizonSource = "explicit" | "next_income" | "funding_period_end" | "default";
+
+export interface HorizonInput {
+  profile: Pick<Profile, "budgetHorizonDate">;
+  incomes: Income[];
+  fundingAwards?: FundingAward[];
+}
+
+export interface HorizonInfo {
+  days: number;
+  source: HorizonSource;
+  /** ISO date the horizon resolves to (today + days), for display. */
+  horizonDate: string;
+}
+
+/** Resolves the budgeting horizon per the priority above. Never invents a date the student didn't (directly or via a stored award/income) provide. */
+export function calculateHorizon(input: HorizonInput, asOf: Date = new Date()): HorizonInfo {
+  const explicit = input.profile.budgetHorizonDate ? new Date(input.profile.budgetHorizonDate) : null;
+  if (explicit && !Number.isNaN(explicit.getTime()) && explicit > asOf) {
+    return { days: Math.max(1, diffDays(explicit, asOf)), source: "explicit", horizonDate: explicit.toISOString() };
+  }
+
+  const next = findNextIncome(input.incomes, asOf);
+  if (next) {
+    const occursOn = new Date(next.occursOn);
+    return { days: Math.max(1, diffDays(occursOn, asOf)), source: "next_income", horizonDate: next.occursOn };
+  }
+
+  const periodEnds = (input.fundingAwards ?? [])
+    .map((a) => (a.periodEnd ? new Date(a.periodEnd) : null))
+    .filter((d): d is Date => d !== null && !Number.isNaN(d.getTime()) && d > asOf)
+    .sort((a, b) => a.getTime() - b.getTime());
+  if (periodEnds.length > 0) {
+    return {
+      days: Math.max(1, diffDays(periodEnds[0], asOf)),
+      source: "funding_period_end",
+      horizonDate: periodEnds[0].toISOString(),
+    };
+  }
+
+  return {
+    days: DEFAULT_HORIZON_DAYS,
+    source: "default",
+    horizonDate: addDays(asOf, DEFAULT_HORIZON_DAYS).toISOString(),
+  };
+}
+
+/** Convenience wrapper over `calculateHorizon` for callers that only need the day count. */
+export function calculateHorizonDays(input: HorizonInput, asOf: Date = new Date()): number {
+  return calculateHorizon(input, asOf).days;
 }
 
 export interface DiscretionaryCashInput {
   profile: Profile;
   expenses: Expense[];
   incomes: Income[];
+  fundingAwards?: FundingAward[];
   asOf?: Date;
 }
 
@@ -239,10 +296,12 @@ export interface DiscretionaryCashInput {
  * Cash genuinely free to spend on optional/unplanned purchases before the
  * next known income arrives, after reserving the emergency buffer and every
  * committed bill (essential or not) expected to fall due in that window.
+ * Returns 0 (with the caller expected to check `profile.balanceKnown`)
+ * rather than a misleading negative/zero figure when balance isn't known.
  */
 export function calculateDiscretionaryCash(input: DiscretionaryCashInput): number {
   const asOf = input.asOf ?? new Date();
-  const horizonDays = calculateHorizonDays(input.incomes, asOf);
+  const horizonDays = calculateHorizonDays(input, asOf);
   const committedOverHorizon = input.expenses.reduce(
     (sum, e) => sum + sumExpenseContribution(e, asOf, horizonDays),
     0,
@@ -255,7 +314,7 @@ export function calculateDiscretionaryCash(input: DiscretionaryCashInput): numbe
 export function calculateSafeWeeklySpend(input: DiscretionaryCashInput): number {
   const asOf = input.asOf ?? new Date();
   const discretionary = calculateDiscretionaryCash(input);
-  const horizonDays = calculateHorizonDays(input.incomes, asOf);
+  const horizonDays = calculateHorizonDays(input, asOf);
   const weeks = Math.max(1, horizonDays / 7);
   return round2(Math.max(0, discretionary / weeks));
 }
@@ -273,14 +332,23 @@ export function forecastBalance(input: ForecastInput, daysAhead: number, asOf: D
   return round2(input.profile.currentBalance - spend + income);
 }
 
-export type AffordabilityStatus = "comfortable" | "caution" | "risky" | "not_recommended" | "cannot_afford";
+export type AffordabilityStatus =
+  | "comfortable"
+  | "caution"
+  | "risky"
+  | "not_recommended"
+  | "cannot_afford"
+  | "unknown_balance";
 
 export interface AffordabilityResult {
   purchaseAmount: number;
-  currentBalance: number;
-  discretionaryCash: number;
-  remainingAfterPurchase: number;
-  /** purchaseAmount / discretionaryCash, or null when discretionaryCash <= 0 (ratio is not meaningful). */
+  /** Null when balanceKnown is false - there is no real balance to report. */
+  currentBalance: number | null;
+  /** False when the student hasn't told us their balance yet - every balance-derived figure below is null and status is always "unknown_balance". */
+  balanceKnown: boolean;
+  discretionaryCash: number | null;
+  remainingAfterPurchase: number | null;
+  /** purchaseAmount / discretionaryCash, or null when discretionaryCash <= 0 or the balance isn't known (ratio is not meaningful). */
   proportionOfDiscretionaryCash: number | null;
   status: AffordabilityStatus;
   horizonDays: number;
@@ -291,6 +359,7 @@ export interface CheckAffordabilityInput {
   profile: Profile;
   expenses: Expense[];
   incomes: Income[];
+  fundingAwards?: FundingAward[];
   purchaseAmount: number;
   asOf?: Date;
 }
@@ -305,9 +374,25 @@ export function checkAffordability(input: CheckAffordabilityInput): Affordabilit
     throw new Error("purchaseAmount must be >= 0");
   }
   const asOf = input.asOf ?? new Date();
+  const horizonDays = calculateHorizonDays(input, asOf);
+  const balanceKnown = input.profile.balanceKnown;
+
+  if (!balanceKnown) {
+    return {
+      purchaseAmount: round2(input.purchaseAmount),
+      currentBalance: null,
+      balanceKnown: false,
+      discretionaryCash: null,
+      remainingAfterPurchase: null,
+      proportionOfDiscretionaryCash: null,
+      status: "unknown_balance",
+      horizonDays,
+      asOf: asOf.toISOString(),
+    };
+  }
+
   const discretionaryCash = calculateDiscretionaryCash({ ...input, asOf });
   const remainingAfterPurchase = round2(discretionaryCash - input.purchaseAmount);
-  const horizonDays = calculateHorizonDays(input.incomes, asOf);
 
   const proportionOfDiscretionaryCash =
     discretionaryCash > 0 ? round2(input.purchaseAmount / discretionaryCash) : null;
@@ -328,12 +413,118 @@ export function checkAffordability(input: CheckAffordabilityInput): Affordabilit
   return {
     purchaseAmount: round2(input.purchaseAmount),
     currentBalance: round2(input.profile.currentBalance),
+    balanceKnown: true,
     discretionaryCash,
     remainingAfterPurchase,
     proportionOfDiscretionaryCash,
     status,
     horizonDays,
     asOf: asOf.toISOString(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Period budgeting - total funding across a period vs. the committed spend
+// across that SAME period. Deliberately kept separate from live cashflow
+// (calculateDiscretionaryCash etc.), which only ever reasons about cash
+// actually available now/soon - see FundingAward doc comment.
+// ---------------------------------------------------------------------------
+
+export interface PeriodBudgetSummary {
+  award: FundingAward;
+  totalFunding: number;
+  periodStart: string | null;
+  periodEnd: string | null;
+  periodDays: number | null;
+  /** Steady-state committed spend (all active recurring expenses) projected across the full period length. Null if the period length isn't known. */
+  expensesOverPeriod: number | null;
+  remainingAfterExpenses: number | null;
+  remainingWeekly: number | null;
+  remainingMonthly: number | null;
+  /** True when period_start/period_end aren't both known, so a rate-based remaining budget can't be computed. */
+  needsPeriodDates: boolean;
+}
+
+/** Total-period affordability for one funding award: total funding minus known recurring costs projected across the whole period. Never mixed with live cash-on-hand. */
+export function calculatePeriodBudgetSummary(award: FundingAward, expenses: Expense[]): PeriodBudgetSummary {
+  const totalFunding = round2(award.totalAmount);
+
+  if (!award.periodStart || !award.periodEnd) {
+    return {
+      award,
+      totalFunding,
+      periodStart: award.periodStart,
+      periodEnd: award.periodEnd,
+      periodDays: null,
+      expensesOverPeriod: null,
+      remainingAfterExpenses: null,
+      remainingWeekly: null,
+      remainingMonthly: null,
+      needsPeriodDates: true,
+    };
+  }
+
+  const periodDays = Math.max(1, diffDays(new Date(award.periodEnd), new Date(award.periodStart)));
+  const periodWeeks = periodDays / 7;
+
+  const weeklyRate = expenses
+    .filter((e) => e.active && e.frequency !== "one_off")
+    .reduce((sum, e) => sum + toWeeklyAmount(e.amount, e.frequency), 0);
+  const expensesOverPeriod = round2(weeklyRate * periodWeeks);
+  const remainingAfterExpenses = round2(totalFunding - expensesOverPeriod);
+
+  return {
+    award,
+    totalFunding,
+    periodStart: award.periodStart,
+    periodEnd: award.periodEnd,
+    periodDays,
+    expensesOverPeriod,
+    remainingAfterExpenses,
+    remainingWeekly: round2(remainingAfterExpenses / periodWeeks),
+    remainingMonthly: round2((remainingAfterExpenses / periodWeeks) * WEEKS_PER_MONTH),
+    needsPeriodDates: false,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Shortfall insight - a plain-language-ready, deterministic answer to
+// "am I projected to run short, and by roughly how much per week would I
+// need to cut back to avoid it". Gemini never computes this number; the UI
+// reads it straight off the summary.
+// ---------------------------------------------------------------------------
+
+export interface ShortfallInsight {
+  /** True only when discretionary cash is negative under a known balance and a confirmed (non-default) horizon. */
+  isShortfall: boolean;
+  /** Positive amount the student is projected to be short by. Null when not in a shortfall or inputs are unknown. */
+  shortfallAmount: number | null;
+  /** Deterministic weekly spending reduction that would close the shortfall by the horizon date. Null under the same conditions as shortfallAmount. */
+  suggestedWeeklyReduction: number | null;
+}
+
+/**
+ * Only meaningful once the student has told us a real balance AND we have a
+ * confirmed horizon to plan against (an explicit date, next income, or a
+ * funding period end) - the unconfirmed `default` horizon isn't a real
+ * deadline, so a reduction-per-week figure against it would be invented.
+ */
+export function calculateShortfallInsight(
+  discretionaryCash: number | null,
+  horizonDays: number,
+  horizonSource: HorizonSource,
+): ShortfallInsight {
+  const horizonConfirmed = horizonSource !== "default";
+  if (discretionaryCash === null || !horizonConfirmed || discretionaryCash >= 0) {
+    return { isShortfall: false, shortfallAmount: null, suggestedWeeklyReduction: null };
+  }
+
+  const shortfallAmount = round2(-discretionaryCash);
+  const weeks = Math.max(horizonDays / 7, 1 / 7);
+  return {
+    isShortfall: true,
+    shortfallAmount,
+    suggestedWeeklyReduction: round2(shortfallAmount / weeks),
   };
 }
 
@@ -360,15 +551,25 @@ export interface FinancialSummary {
   profile: Profile;
   committedSpend: WeeklyMonthlyAmount;
   essentialSpend: WeeklyMonthlyAmount;
-  discretionaryCash: number;
-  safeWeeklySpend: number;
+  /** Null when profile.balanceKnown is false - the student hasn't told us a balance yet, so a live cashflow figure would be misleading. */
+  discretionaryCash: number | null;
+  safeWeeklySpend: number | null;
+  /** Positive amount the student is projected to run short by. Null when not in a shortfall or inputs are unknown - see calculateShortfallInsight. */
+  shortfallAmount: number | null;
+  /** Deterministic weekly spending reduction that would close the shortfall by the horizon date. */
+  suggestedWeeklyReduction: number | null;
   horizonDays: number;
+  horizonSource: HorizonSource;
+  horizonDate: string;
   nextIncome: NextIncome | null;
   upcomingCommitments: UpcomingCommitment[];
   budgetCategories: BudgetCategoryBreakdown[];
   recentTransactions: Transaction[];
   goals: Goal[];
-  forecast30d: number;
+  fundingAwards: FundingAward[];
+  periodBudgets: PeriodBudgetSummary[];
+  recentIncomeReceipts: IncomeReceipt[];
+  forecast30d: number | null;
   asOf: string;
 }
 
@@ -376,7 +577,7 @@ const UPCOMING_COMMITMENTS_WINDOW_DAYS = 60;
 const RECENT_TRANSACTIONS_LIMIT = 8;
 
 export function calculateFinancialSummary(state: FinancialState, asOf: Date = new Date()): FinancialSummary {
-  const { profile, expenses, incomes, transactions, goals } = state;
+  const { profile, expenses, incomes, transactions, goals, fundingAwards, incomeReceipts } = state;
 
   const activeExpenses = expenses.filter((e) => e.active);
 
@@ -406,21 +607,32 @@ export function calculateFinancialSummary(state: FinancialState, asOf: Date = ne
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     .slice(0, RECENT_TRANSACTIONS_LIMIT);
 
-  const engineInput = { profile, expenses, incomes, asOf };
+  const engineInput = { profile, expenses, incomes, fundingAwards, asOf };
+  const horizon = calculateHorizon(engineInput, asOf);
+  const periodBudgets = fundingAwards.map((award) => calculatePeriodBudgetSummary(award, expenses));
+  const discretionaryCash = profile.balanceKnown ? calculateDiscretionaryCash(engineInput) : null;
+  const shortfall = calculateShortfallInsight(discretionaryCash, horizon.days, horizon.source);
 
   return {
     profile,
     committedSpend: calculateCommittedSpend(expenses),
     essentialSpend: calculateExpectedEssentialSpend(expenses),
-    discretionaryCash: calculateDiscretionaryCash(engineInput),
-    safeWeeklySpend: calculateSafeWeeklySpend(engineInput),
-    horizonDays: calculateHorizonDays(incomes, asOf),
+    discretionaryCash,
+    safeWeeklySpend: profile.balanceKnown ? calculateSafeWeeklySpend(engineInput) : null,
+    shortfallAmount: shortfall.shortfallAmount,
+    suggestedWeeklyReduction: shortfall.suggestedWeeklyReduction,
+    horizonDays: horizon.days,
+    horizonSource: horizon.source,
+    horizonDate: horizon.horizonDate,
     nextIncome: findNextIncome(incomes, asOf),
     upcomingCommitments,
     budgetCategories,
     recentTransactions,
     goals,
-    forecast30d: forecastBalance({ profile, expenses, incomes }, 30, asOf),
+    fundingAwards,
+    periodBudgets,
+    recentIncomeReceipts: incomeReceipts,
+    forecast30d: profile.balanceKnown ? forecastBalance({ profile, expenses, incomes }, 30, asOf) : null,
     asOf: asOf.toISOString(),
   };
 }
