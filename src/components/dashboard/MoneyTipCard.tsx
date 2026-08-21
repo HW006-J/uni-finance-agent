@@ -27,8 +27,8 @@ export function MoneyTipCard({ context }: { context: TipContext }) {
     <Card
       className={
         isWarning
-          ? "animate-pop-in border-warn/30 bg-warn-light p-5"
-          : "animate-pop-in border-accent/30 bg-accent-light p-5"
+          ? "animate-pop-in border-warn/30 bg-warn-light p-4"
+          : "animate-pop-in border-accent/30 bg-accent-light p-4"
       }
     >
       <div className="flex items-start justify-between gap-3">
@@ -45,20 +45,20 @@ export function MoneyTipCard({ context }: { context: TipContext }) {
         </button>
       </div>
 
-      <p className={`mt-2 text-base font-bold ${isWarning ? "text-warn-dark" : "text-ink"}`}>{tip.title}</p>
-      <p className="mt-1 text-sm font-medium text-ink-soft">{tip.body}</p>
+      <p className={`mt-1.5 text-sm font-bold ${isWarning ? "text-warn-dark" : "text-ink"}`}>{tip.title}</p>
+      <p className="mt-0.5 text-sm font-medium text-ink-soft">{tip.body}</p>
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
         <a
           href={tip.sourceUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className={`text-sm font-bold underline underline-offset-2 ${isWarning ? "text-warn-dark" : "text-accent-dark"}`}
+          className={`text-xs font-bold underline underline-offset-2 ${isWarning ? "text-warn-dark" : "text-accent-dark"}`}
         >
           {tip.sourceLabel} →
         </a>
         {queue.length > 1 ? (
-          <Button variant="ghost" className="!px-3 !py-1.5 text-xs" onClick={() => setIndex((i) => (i + 1) % queue.length)}>
+          <Button variant="ghost" className="!px-3 !py-1 text-xs" onClick={() => setIndex((i) => (i + 1) % queue.length)}>
             Next tip
           </Button>
         ) : null}

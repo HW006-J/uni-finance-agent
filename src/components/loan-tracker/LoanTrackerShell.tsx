@@ -414,7 +414,7 @@ export function LoanTrackerShell() {
       </div>
 
       <p className="mx-auto mt-8 max-w-3xl text-center text-xs text-ink-faint">
-        Wallet Buddy doesn&rsquo;t give financial advice. Figures are estimates under current rules and may change.
+        Runway doesn&rsquo;t give financial advice. Figures are estimates under current rules and may change.
       </p>
     </main>
   );
