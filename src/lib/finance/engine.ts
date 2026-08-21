@@ -138,6 +138,26 @@ export function getNextOccurrenceDate(
 // where proration would misrepresent a bill landing just inside the window)
 // ---------------------------------------------------------------------------
 
+/** Every occurrence date of a (possibly recurring) anchor within [asOf, asOf + windowDays], inclusive. */
+function occurrenceDatesInWindow(
+  frequency: RecurrenceFrequency,
+  anchorDateIso: string,
+  asOf: Date,
+  windowDays: number,
+): Date[] {
+  const windowEnd = addDays(asOf, windowDays);
+  let occurrence = getNextOccurrenceDate(anchorDateIso, frequency, asOf);
+  const dates: Date[] = [];
+  let guard = 0;
+  while (occurrence && occurrence <= windowEnd && guard < 2000) {
+    dates.push(occurrence);
+    if (frequency === "one_off") break;
+    occurrence = addPeriod(occurrence, frequency);
+    guard += 1;
+  }
+  return dates;
+}
+
 function sumOccurrencesInWindow(
   amount: number,
   frequency: RecurrenceFrequency,
@@ -145,17 +165,7 @@ function sumOccurrencesInWindow(
   asOf: Date,
   windowDays: number,
 ): number {
-  const windowEnd = addDays(asOf, windowDays);
-  let occurrence = getNextOccurrenceDate(anchorDateIso, frequency, asOf);
-  let total = 0;
-  let guard = 0;
-  while (occurrence && occurrence <= windowEnd && guard < 2000) {
-    total += amount;
-    if (frequency === "one_off") break;
-    occurrence = addPeriod(occurrence, frequency);
-    guard += 1;
-  }
-  return total;
+  return occurrenceDatesInWindow(frequency, anchorDateIso, asOf, windowDays).length * amount;
 }
 
 /** How much of this expense falls due within [asOf, asOf + windowDays]. */
@@ -595,6 +605,110 @@ export function calculateShortfallInsight(
 }
 
 // ---------------------------------------------------------------------------
+// Actual runway - "at the current rate, how many days does the student's
+// available money genuinely last", as distinct from the TARGET/"needs to
+// last" figure (`calculateHorizon`, unchanged - today -> the confirmed major
+// horizon). This is the hero's central comparison: actual runway vs. target
+// days. See `calculateDiscretionaryCash` for the exact same buffer/committed
+// spend/recurring-income accounting this reuses - `discretionaryCash >= 0`
+// at the target horizon IS "the money lasts to the target", so that sign is
+// the single source of truth for the red/green state. When it's negative
+// (a shortfall), this walks day-by-day through the SAME dated
+// expense/income occurrences (plus undated recurring expenses spread as a
+// smooth daily rate, matching their steady-state proration in
+// `sumExpenseContribution`) to find the exact day the running balance first
+// goes negative - deterministic arithmetic, no LLM involved, same principle
+// as `estimateRunOutDate` but bounded to the target window and precise to
+// the day rather than a flat weekly rate.
+// ---------------------------------------------------------------------------
+
+export interface ActualRunway {
+  /**
+   * Days from `asOf` the money is projected to last. Capped at `targetDays`
+   * when the balance survives the whole target window (`meetsTarget`) -
+   * deliberately NOT extrapolated further, since that would mean inventing
+   * a runway beyond the known planning window from an assumed-steady rate.
+   */
+  days: number;
+  /** True when the balance survives the entire target-horizon window without going negative - the "140+" / on-track case. */
+  meetsTarget: boolean;
+  /** ISO date the balance is projected to first go negative. Null when meetsTarget is true. */
+  runOutDate: string | null;
+  /** targetDays - days. Null when meetsTarget is true (nothing to be short by). */
+  daysShort: number | null;
+}
+
+/**
+ * Only meaningful once the student has a known balance and a confirmed
+ * (non-default) target horizon to measure against - mirrors the same
+ * gating `calculateShortfallInsight` and `estimateRunOutDate` use, so the
+ * hero never fabricates a runway against an unconfirmed default window.
+ */
+export function calculateActualRunway(
+  profile: Pick<Profile, "currentBalance" | "emergencyBuffer" | "balanceKnown">,
+  expenses: Expense[],
+  incomes: Income[],
+  discretionaryCash: number | null,
+  targetDays: number,
+  horizonSource: HorizonSource,
+  asOf: Date = new Date(),
+): ActualRunway | null {
+  if (!profile.balanceKnown || discretionaryCash === null || horizonSource === "default") return null;
+
+  if (discretionaryCash >= 0) {
+    return { days: targetDays, meetsTarget: true, runOutDate: null, daysShort: null };
+  }
+
+  // Undated recurring expenses have no occurrence date to place on the
+  // timeline - spread them as a smooth daily rate whose total over the full
+  // window exactly matches their steady-state proration in
+  // `sumExpenseContribution`, rather than lumping the whole amount on one day.
+  const undatedWeeklyRate = expenses
+    .filter((e) => e.active && e.frequency !== "one_off" && !e.nextDueDate)
+    .reduce((sum, e) => sum + toWeeklyAmount(e.amount, e.frequency), 0);
+  const dailySmoothDrain = undatedWeeklyRate / 7;
+
+  type RunwayEvent = { date: Date; delta: number };
+  const events: RunwayEvent[] = [];
+
+  for (const e of expenses) {
+    if (!e.active || !e.nextDueDate) continue; // undated -> covered by dailySmoothDrain (recurring) or contributes nothing (one-off, per sumExpenseContribution)
+    for (const d of occurrenceDatesInWindow(e.frequency, e.nextDueDate, asOf, targetDays)) {
+      events.push({ date: d, delta: -e.amount });
+    }
+  }
+  for (const i of incomes) {
+    if (isMajorIncomeFrequency(i.frequency)) continue; // the major payment at/beyond the horizon is never available before it lands
+    for (const d of occurrenceDatesInWindow(i.frequency, i.date, asOf, targetDays)) {
+      events.push({ date: d, delta: i.amount });
+    }
+  }
+  events.sort((a, b) => a.date.getTime() - b.date.getTime());
+
+  let running = round2(profile.currentBalance - (profile.emergencyBuffer ?? 0));
+  if (running <= 0) {
+    return { days: 0, meetsTarget: false, runOutDate: asOf.toISOString(), daysShort: targetDays };
+  }
+
+  let eventIndex = 0;
+  for (let day = 1; day <= targetDays; day++) {
+    running = round2(running - dailySmoothDrain);
+    while (eventIndex < events.length && diffDays(events[eventIndex].date, asOf) <= day) {
+      running = round2(running + events[eventIndex].delta);
+      eventIndex += 1;
+    }
+    if (running < 0) {
+      return { days: day, meetsTarget: false, runOutDate: addDays(asOf, day).toISOString(), daysShort: targetDays - day };
+    }
+  }
+
+  // Rounding-edge fallback: discretionaryCash was negative but the day-by-day
+  // walk never dipped below zero (sub-penny drift) - treat the last day of
+  // the window as the run-out point rather than silently reporting "on track".
+  return { days: targetDays, meetsTarget: false, runOutDate: addDays(asOf, targetDays).toISOString(), daysShort: 0 };
+}
+
+// ---------------------------------------------------------------------------
 // Runway estimate - a simple, deterministic "at this rate, here's roughly
 // when it runs out" projection. Distinct from `calculateDiscretionaryCash`
 // (bill-precise, but only tells you the position AT the horizon date) -
@@ -676,6 +790,8 @@ export interface FinancialSummary {
   suggestedWeeklyReduction: number | null;
   /** Rate-based "at this rate, here's roughly when it runs out" projection. Null unless balance, spending and a confirmed horizon are all known - see `estimateRunOutDate`. */
   runOutEstimate: RunOutEstimate | null;
+  /** The hero's central figure - how many days the money ACTUALLY lasts vs. `horizonDays` (the target/"needs to last"). See `calculateActualRunway`. Null under the same gating as `runOutEstimate`. */
+  actualRunway: ActualRunway | null;
   horizonDays: number;
   horizonSource: HorizonSource;
   horizonDate: string;
@@ -743,6 +859,7 @@ export function calculateFinancialSummary(state: FinancialState, asOf: Date = ne
     shortfallAmount: shortfall.shortfallAmount,
     suggestedWeeklyReduction: shortfall.suggestedWeeklyReduction,
     runOutEstimate: estimateRunOutDate(profile, expenses, incomes, horizon.source, asOf),
+    actualRunway: calculateActualRunway(profile, expenses, incomes, discretionaryCash, horizon.days, horizon.source, asOf),
     horizonDays: horizon.days,
     horizonSource: horizon.source,
     horizonDate: horizon.horizonDate,
