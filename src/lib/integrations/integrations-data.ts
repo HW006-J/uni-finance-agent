@@ -17,6 +17,21 @@
 
 export type IntegrationStatus = "Concept" | "Resource";
 
+/**
+ * Each organisation's real logo, saved locally under public/integrations/
+ * (never hotlinked) and sourced from that organisation's own official
+ * website - see the source comment inside each asset file for exactly
+ * where it came from. `needsDarkBackdrop` is set for the logos whose
+ * official file is white/light-coloured (served on the organisation's own
+ * dark header) so they stay visible against Runway's light card
+ * background, without altering the asset itself.
+ */
+export interface OrgLogo {
+  src: string;
+  alt: string;
+  needsDarkBackdrop?: boolean;
+}
+
 export interface ConceptIntegration {
   id: string;
   name: string;
@@ -26,6 +41,7 @@ export interface ConceptIntegration {
   /** Optional one-line clarification of the real-world mechanism this concept is inspired by (e.g. "Open Banking"). Never a claim that it's built. */
   secondaryLine?: string;
   status: "Concept";
+  logo: OrgLogo;
 }
 
 export interface ResourceIntegration {
@@ -38,6 +54,7 @@ export interface ResourceIntegration {
   /** The organisation's own official page - never a third-party aggregator. */
   url: string;
   status: "Resource";
+  logo: OrgLogo;
 }
 
 export const CONCEPT_INTEGRATIONS: ConceptIntegration[] = [
@@ -48,6 +65,7 @@ export const CONCEPT_INTEGRATIONS: ConceptIntegration[] = [
     description: "Automatically keep your balance and spending up to date instead of telling Runway about every purchase.",
     secondaryLine: "Future Open Banking / bank-data integration - not connected today.",
     status: "Concept",
+    logo: { src: "/integrations/natwest.svg", alt: "NatWest logo" },
   },
   {
     id: "payabl",
@@ -56,6 +74,7 @@ export const CONCEPT_INTEGRATIONS: ConceptIntegration[] = [
     description: "Turn your safe weekly spend into a spending limit or controlled payment experience.",
     secondaryLine: "A future concept using payments infrastructure like payabl.'s card issuing and spend caps - no card exists today.",
     status: "Concept",
+    logo: { src: "/integrations/payabl.svg", alt: "payabl. logo", needsDarkBackdrop: true },
   },
   {
     id: "ipushpull",
@@ -64,6 +83,7 @@ export const CONCEPT_INTEGRATIONS: ConceptIntegration[] = [
     description: "Bring updates from different financial systems into Runway automatically.",
     secondaryLine: "A future real-time data/workflow concept inspired by ipushpull's data-delivery platform - not integrated today.",
     status: "Concept",
+    logo: { src: "/integrations/ipushpull.png", alt: "ipushpull logo", needsDarkBackdrop: true },
   },
 ];
 
@@ -76,6 +96,7 @@ export const RESOURCE_INTEGRATIONS: ResourceIntegration[] = [
     buttonLabel: "Explore resources →",
     url: "https://www.thehgfoundation.com/partnerships",
     status: "Resource",
+    logo: { src: "/integrations/hg-foundation.svg", alt: "The Hg Foundation logo" },
   },
   {
     id: "lfbf",
@@ -85,6 +106,7 @@ export const RESOURCE_INTEGRATIONS: ResourceIntegration[] = [
     buttonLabel: "Explore resources →",
     url: "https://www.lfbf.org.uk/research-report/young-persons-money-index-2025-2026/",
     status: "Resource",
+    logo: { src: "/integrations/lfbf.png", alt: "London Foundation for Banking & Finance logo" },
   },
   {
     id: "harrington-starr",
@@ -94,5 +116,6 @@ export const RESOURCE_INTEGRATIONS: ResourceIntegration[] = [
     buttonLabel: "Explore opportunities →",
     url: "https://www.harringtonstarr.com/candidates/job-search/",
     status: "Resource",
+    logo: { src: "/integrations/harrington-starr.svg", alt: "Harrington Starr logo", needsDarkBackdrop: true },
   },
 ];

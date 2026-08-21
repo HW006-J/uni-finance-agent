@@ -5,13 +5,27 @@ import {
   CONCEPT_INTEGRATIONS,
   RESOURCE_INTEGRATIONS,
   type ConceptIntegration,
+  type OrgLogo,
   type ResourceIntegration,
 } from "@/lib/integrations/integrations-data";
 
-function OrgMark({ name }: { name: string }) {
+/**
+ * Fixed-height, auto-width logo slot so every card's header row lines up
+ * regardless of a logo's own aspect ratio (a square icon mark vs. a wide
+ * wordmark) - object-contain preserves the aspect ratio with no cropping
+ * or distortion. Logos whose official file is white/light-coloured get a
+ * small dark backdrop chip so they stay visible on Runway's light card.
+ */
+function OrgMark({ logo }: { logo: OrgLogo }) {
   return (
-    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-cream-dark text-sm font-extrabold text-ink-soft">
-      {name.trim().charAt(0)}
+    <div
+      className={cx(
+        "flex h-10 max-w-[104px] shrink-0 items-center rounded-xl px-1.5",
+        logo.needsDarkBackdrop ? "bg-ink py-1.5" : "bg-transparent",
+      )}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element -- local static asset, no remote-image optimisation needed */}
+      <img src={logo.src} alt={logo.alt} className="h-full max-h-10 w-auto max-w-[96px] object-contain" />
     </div>
   );
 }
@@ -35,7 +49,7 @@ function ConceptCard({ item }: { item: ConceptIntegration }) {
     <Card className="flex flex-col gap-3 p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <OrgMark name={item.name} />
+          <OrgMark logo={item.logo} />
           <div>
             <p className="text-sm font-extrabold text-ink">{item.name}</p>
             <p className="text-xs font-bold text-ink-soft">{item.purpose}</p>
@@ -54,7 +68,7 @@ function ResourceCard({ item }: { item: ResourceIntegration }) {
     <Card className="flex flex-col gap-3 p-5">
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-center gap-3">
-          <OrgMark name={item.name} />
+          <OrgMark logo={item.logo} />
           <div>
             <p className="text-sm font-extrabold text-ink">{item.name}</p>
             <p className="text-xs font-bold text-ink-soft">{item.purpose}</p>

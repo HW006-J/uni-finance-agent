@@ -77,4 +77,44 @@ describe("IntegrationsShell", () => {
     const { container } = render(<IntegrationsShell />);
     expect(container.textContent).not.toMatch(/partners? with|official (natwest|payabl|ipushpull) integration/i);
   });
+
+  it("renders every organisation's real logo (never a placeholder letter avatar) with correct src, alt text and aspect-ratio-preserving styling", () => {
+    usePathnameMock.mockReturnValue("/integrations");
+    render(<IntegrationsShell />);
+
+    const allItems = [...CONCEPT_INTEGRATIONS, ...RESOURCE_INTEGRATIONS];
+    expect(allItems.length).toBeGreaterThan(0);
+
+    for (const item of allItems) {
+      const img = screen.getByAltText(item.logo.alt);
+      expect(img.tagName).toBe("IMG");
+      expect(img).toHaveAttribute("src", item.logo.src);
+      // Local static asset under public/ - never hotlinked from a third-party domain.
+      expect(item.logo.src.startsWith("/integrations/")).toBe(true);
+      expect(item.logo.src).not.toMatch(/^https?:\/\//);
+      // object-contain preserves aspect ratio - never stretched/cropped via object-cover or fixed w+h mismatch.
+      expect(img.className).toContain("object-contain");
+    }
+
+    // No leftover single-letter placeholder avatars.
+    for (const item of allItems) {
+      expect(screen.queryByText(item.name.trim().charAt(0), { selector: "div" })).not.toBeInTheDocument();
+    }
+  });
+
+  it("gives the light-coloured logos (payabl., ipushpull, Harrington Starr) a dark backdrop so they stay visible, and leaves the dark-coloured logos (NatWest, Hg Foundation, LFBF) unstyled", () => {
+    usePathnameMock.mockReturnValue("/integrations");
+    render(<IntegrationsShell />);
+
+    const allItems = [...CONCEPT_INTEGRATIONS, ...RESOURCE_INTEGRATIONS];
+    for (const item of allItems) {
+      const img = screen.getByAltText(item.logo.alt);
+      const wrapper = img.parentElement!;
+      if (item.logo.needsDarkBackdrop) {
+        expect(wrapper.className).toContain("bg-ink");
+      } else {
+        expect(wrapper.className).not.toContain("bg-ink");
+      }
+    }
+  });
 });
