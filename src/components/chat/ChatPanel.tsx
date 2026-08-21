@@ -48,7 +48,7 @@ export function ChatPanel({
   return (
     <Card className="flex h-full flex-col p-5 shadow-tactile">
       <div className="flex items-center justify-between">
-        <h2 className="text-base font-extrabold text-ink">Talk it through</h2>
+        <h2 className="text-base font-extrabold text-ink">Ask Runway</h2>
         {statusMessage ? (
           <span className="flex items-center gap-1.5 text-xs font-semibold text-brand-dark">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-brand" />
@@ -59,9 +59,7 @@ export function ChatPanel({
 
       <div ref={scrollRef} className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1" style={{ maxHeight: 480, minHeight: 280 }}>
         {messages.length === 0 ? (
-          <p className="text-sm text-ink-soft">
-            Try: &ldquo;I&rsquo;ve got £4,500 left, rent is £650 a month, food is £55 a week&rdquo;
-          </p>
+          <p className="text-sm text-ink-soft">Try: &ldquo;Can I afford £80 this weekend?&rdquo;</p>
         ) : (
           messages.map((m) => <MessageBubble key={m.id} message={m} />)
         )}
@@ -71,7 +69,7 @@ export function ChatPanel({
         <input
           value={displayValue}
           onChange={(e) => setInput(e.target.value)}
-          placeholder={micActive ? "Listening…" : "Tell me what's going on with your money…"}
+          placeholder={micActive ? "Listening…" : "Tell Runway what's changed…"}
           disabled={isSending || micActive}
           className="min-w-0 flex-1 rounded-2xl border border-border bg-cream px-4 py-3 text-sm font-medium text-ink placeholder:text-ink-faint focus:border-brand focus:outline-none disabled:opacity-70"
         />

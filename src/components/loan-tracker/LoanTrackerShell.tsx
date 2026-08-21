@@ -413,7 +413,7 @@ export function LoanTrackerShell() {
                 ) : null}
               </ul>
               <p className="mt-3 text-xs font-semibold text-caution-dark/80">
-                Wallet Buddy doesn&rsquo;t recommend either choice - it&rsquo;s your call.{" "}
+                Runway doesn&rsquo;t recommend either choice - it&rsquo;s your call.{" "}
                 <a
                   href="https://www.gov.uk/repaying-your-student-loan/make-extra-repayments"
                   target="_blank"
