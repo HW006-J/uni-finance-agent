@@ -36,7 +36,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "check-payment-dates",
     title: "Know your exact payment dates",
-    body: "Maintenance Loan instalments are paid directly to your bank account once you've registered - the exact dates are in your online Student Finance account. Tell Wallet Buddy each real date so it can budget accurately.",
+    body: "Maintenance Loan instalments are paid directly to your bank account once you've registered - the exact dates are in your online Student Finance account. Tell Runway each real date so it can budget accurately.",
     category: "student_finance",
     sourceLabel: "GOV.UK — Student finance for undergraduates",
     sourceUrl: "https://www.gov.uk/student-finance/new-fulltime-students",

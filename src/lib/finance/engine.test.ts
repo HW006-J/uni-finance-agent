@@ -10,6 +10,7 @@ import {
   calculateSafeWeeklySpend,
   calculateShortfallInsight,
   checkAffordability,
+  estimateRunOutDate,
   findNextIncome,
   forecastBalance,
   toMonthlyAmount,
@@ -432,6 +433,8 @@ describe("calculateFinancialSummary", () => {
     expect(summary.discretionaryCash).toBeLessThan(0);
     expect(summary.shortfallAmount).toBe(-summary.discretionaryCash!);
     expect(summary.suggestedWeeklyReduction).toBeGreaterThan(0);
+    // A shortfall implies real recurring spending, a known balance and a confirmed horizon - exactly estimateRunOutDate's own gating - so a run-out projection should be present too.
+    expect(summary.runOutEstimate).not.toBeNull();
   });
 
   it("reports no shortfall for a healthy budget", () => {
@@ -444,6 +447,79 @@ describe("calculateFinancialSummary", () => {
 
     expect(summary.shortfallAmount).toBeNull();
     expect(summary.suggestedWeeklyReduction).toBeNull();
+    // No recurring expenses on record -> no committed-spend rate to project against.
+    expect(summary.runOutEstimate).toBeNull();
+  });
+
+  it("never fabricates a runOutEstimate when the balance isn't known, even with heavy recurring spending on record", () => {
+    const profile = makeProfile({ currentBalance: 0, balanceKnown: false });
+    const incomes = [makeIncome({ source: "Wages", amount: 500, date: "2026-01-08T00:00:00.000Z", frequency: "one_off" })];
+    const expenses = [makeExpense({ name: "Rent", amount: 900, category: "rent", frequency: "monthly" })];
+    const summary = calculateFinancialSummary(
+      { profile, incomes, expenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+
+    expect(summary.runOutEstimate).toBeNull();
+  });
+
+  it("never fabricates a runOutEstimate against the unconfirmed default horizon", () => {
+    const profile = makeProfile({ currentBalance: 500, balanceKnown: true });
+    const expenses = [makeExpense({ name: "Rent", amount: 900, category: "rent", frequency: "monthly" })];
+    // No incomes, no funding awards, no explicit horizon -> horizonSource is "default".
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [], expenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+
+    expect(summary.horizonSource).toBe("default");
+    expect(summary.runOutEstimate).toBeNull();
+  });
+});
+
+describe("estimateRunOutDate", () => {
+  const asOf = new Date("2026-01-01T00:00:00.000Z");
+
+  it("returns null when the balance isn't known", () => {
+    const profile = makeProfile({ currentBalance: 1000, balanceKnown: false });
+    const expenses = [makeExpense({ amount: 100, frequency: "weekly" })];
+    expect(estimateRunOutDate(profile, expenses, "next_income", asOf)).toBeNull();
+  });
+
+  it("returns null against the unconfirmed default horizon", () => {
+    const profile = makeProfile({ currentBalance: 1000, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 100, frequency: "weekly" })];
+    expect(estimateRunOutDate(profile, expenses, "default", asOf)).toBeNull();
+  });
+
+  it("returns null when there's no recurring spending to project a rate from", () => {
+    const profile = makeProfile({ currentBalance: 1000, balanceKnown: true });
+    expect(estimateRunOutDate(profile, [], "next_income", asOf)).toBeNull();
+  });
+
+  it("projects a run-out date from the buffer-adjusted balance at the current weekly committed-spend rate", () => {
+    const profile = makeProfile({ currentBalance: 1000, emergencyBuffer: 100, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 90, frequency: "weekly" })];
+    // (1000 - 100) available / 90 per week * 7 days = 70 days.
+    const result = estimateRunOutDate(profile, expenses, "next_income", asOf);
+    expect(result).not.toBeNull();
+    expect(result!.days).toBe(70);
+    expect(new Date(result!.date).getTime()).toBeGreaterThan(asOf.getTime());
+  });
+
+  it("reports zero days when the buffer already exceeds the current balance", () => {
+    const profile = makeProfile({ currentBalance: 50, emergencyBuffer: 100, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 90, frequency: "weekly" })];
+    const result = estimateRunOutDate(profile, expenses, "next_income", asOf);
+    expect(result).toEqual({ days: 0, date: asOf.toISOString() });
+  });
+
+  it("treats an unset emergency buffer as zero", () => {
+    const profile = makeProfile({ currentBalance: 700, emergencyBuffer: null, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 700, frequency: "weekly" })];
+    // 700 available / 700 per week * 7 days = 7 days.
+    const result = estimateRunOutDate(profile, expenses, "next_income", asOf);
+    expect(result!.days).toBe(7);
   });
 });
 

@@ -529,6 +529,47 @@ export function calculateShortfallInsight(
 }
 
 // ---------------------------------------------------------------------------
+// Runway estimate - a simple, deterministic "at this rate, here's roughly
+// when it runs out" projection. Distinct from `calculateDiscretionaryCash`
+// (bill-precise, but only tells you the position AT the horizon date) -
+// this extrapolates the current flat committed-spend rate forward to find
+// when the balance would actually hit zero. Gemini never computes this;
+// it's arithmetic over already-known figures, same as the rest of this file.
+// ---------------------------------------------------------------------------
+
+export interface RunOutEstimate {
+  /** Whole days from `asOf` until the balance is projected to reach zero at the current steady-state committed-spend rate. */
+  days: number;
+  /** ISO date the balance is projected to run out. */
+  date: string;
+}
+
+/**
+ * Only meaningful once the student has a known balance, some recurring
+ * spending on record, and a confirmed (non-default) budgeting horizon -
+ * otherwise there's no real "current spending rate" or deadline to project
+ * against, so this returns null rather than inventing a date. Mirrors the
+ * same gating `calculateShortfallInsight` uses for `horizonSource`.
+ */
+export function estimateRunOutDate(
+  profile: Profile,
+  expenses: Expense[],
+  horizonSource: HorizonSource,
+  asOf: Date = new Date(),
+): RunOutEstimate | null {
+  if (!profile.balanceKnown || horizonSource === "default") return null;
+
+  const weeklyRate = calculateCommittedSpend(expenses).weekly;
+  if (weeklyRate <= 0) return null;
+
+  const available = round2(profile.currentBalance - (profile.emergencyBuffer ?? 0));
+  if (available <= 0) return { days: 0, date: asOf.toISOString() };
+
+  const days = Math.round((available / weeklyRate) * 7);
+  return { days, date: addDays(asOf, days).toISOString() };
+}
+
+// ---------------------------------------------------------------------------
 // Dashboard-facing aggregate summary
 // ---------------------------------------------------------------------------
 
@@ -558,6 +599,8 @@ export interface FinancialSummary {
   shortfallAmount: number | null;
   /** Deterministic weekly spending reduction that would close the shortfall by the horizon date. */
   suggestedWeeklyReduction: number | null;
+  /** Rate-based "at this rate, here's roughly when it runs out" projection. Null unless balance, spending and a confirmed horizon are all known - see `estimateRunOutDate`. */
+  runOutEstimate: RunOutEstimate | null;
   horizonDays: number;
   horizonSource: HorizonSource;
   horizonDate: string;
@@ -621,6 +664,7 @@ export function calculateFinancialSummary(state: FinancialState, asOf: Date = ne
     safeWeeklySpend: profile.balanceKnown ? calculateSafeWeeklySpend(engineInput) : null,
     shortfallAmount: shortfall.shortfallAmount,
     suggestedWeeklyReduction: shortfall.suggestedWeeklyReduction,
+    runOutEstimate: estimateRunOutDate(profile, expenses, horizon.source, asOf),
     horizonDays: horizon.days,
     horizonSource: horizon.source,
     horizonDate: horizon.horizonDate,

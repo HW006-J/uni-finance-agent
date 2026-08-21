@@ -1,9 +1,11 @@
-# Wallet Buddy
+# Runway
 
-A voice-capable AI financial companion for university students. Tell it your
-financial situation in plain language; it extracts structured data,
-persists it, and answers questions like "Can I afford a £500 desk?" using
-a deterministic budgeting engine — never LLM-invented numbers.
+A voice-capable AI financial companion for university students. Runway
+tells you how long your money can last and what's safe to spend before your
+next payment. Tell it your financial situation in plain language; it
+extracts structured data, persists it, and answers questions like "Can I
+afford a £500 desk?" using a deterministic budgeting engine — never
+LLM-invented numbers.
 
 ## Stack
 
