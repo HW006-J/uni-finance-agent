@@ -1,6 +1,7 @@
 import { Card } from "@/components/ui/Card";
 import { formatMoney, formatMoneyWhole } from "@/lib/finance/format";
 import { FREQUENCY_LABELS } from "@/lib/finance/constants";
+import { cx } from "@/lib/cx";
 import type { FinancialSummary } from "@/lib/finance/engine";
 
 function formatDayMonth(iso: string): string {
@@ -8,25 +9,30 @@ function formatDayMonth(iso: string): string {
 }
 
 /**
- * The three hero metrics answer, in order: how long until the next major
- * payment, how much is safe to spend this week (on top of already-planned
- * costs), and how much is available right now. Always rendered together so
- * a judge can read the whole picture in about three seconds - see the
- * product brief's "three questions" requirement.
+ * The hero's central concept is a comparison, not a single number: how long
+ * the money ACTUALLY lasts at the current rate (`actualRunway`) vs. how
+ * long it NEEDS to last (`horizonDays`, unchanged - the confirmed next
+ * major payment/explicit date/funding period end). Everything else -
+ * safe extra spend, on-track/short status, next payment, balance - is
+ * secondary detail in service of that one comparison. See the product
+ * brief's "3-second read" requirement: runway vs. target, then status,
+ * then supporting numbers.
  */
 export function BalanceHero({ summary }: { summary: FinancialSummary }) {
   const {
     profile,
     safeWeeklySpend,
-    discretionaryCash,
-    shortfallAmount,
     suggestedWeeklyReduction,
     nextMajorPayment,
     recurringIncomes,
-    runOutEstimate,
+    actualRunway,
+    horizonDays,
+    horizonSource,
   } = summary;
   const balanceKnown = profile.balanceKnown;
-  const gapDays = runOutEstimate && nextMajorPayment ? nextMajorPayment.daysAway - runOutEstimate.days : null;
+  const horizonConfirmed = horizonSource !== "default";
+  const offTrack = actualRunway !== null && !actualRunway.meetsTarget;
+  const onTrack = actualRunway !== null && actualRunway.meetsTarget;
 
   return (
     <Card className="p-8 shadow-tactile">
@@ -34,25 +40,64 @@ export function BalanceHero({ summary }: { summary: FinancialSummary }) {
 
       <div className="mt-3 grid grid-cols-1 gap-5 sm:grid-cols-3">
         <div>
-          <p className="text-3xl font-extrabold tracking-tight text-ink">
-            {nextMajorPayment ? nextMajorPayment.daysAway : "—"}
+          <p
+            className={cx(
+              "text-4xl font-extrabold tracking-tight",
+              offTrack ? "text-warn-dark" : onTrack ? "text-brand-dark" : "text-ink",
+            )}
+          >
+            {actualRunway ? (actualRunway.meetsTarget ? `${horizonDays}+` : actualRunway.days) : "—"}
           </p>
-          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-ink-soft">until next major payment</p>
+          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-ink-soft">Your runway</p>
+        </div>
+        <div>
+          <p className="text-3xl font-extrabold tracking-tight text-ink">{horizonConfirmed ? horizonDays : "—"}</p>
+          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-ink-soft">Needs to last</p>
         </div>
         <div>
           <p className="text-3xl font-extrabold tracking-tight text-brand-dark">
             {safeWeeklySpend !== null ? formatMoney(safeWeeklySpend, profile.currency) : "—"}
           </p>
           <p className="mt-1 text-xs font-bold uppercase tracking-wide text-ink-soft">
-            Safe to spend this week <span className="font-medium normal-case text-ink-faint">· after your planned costs</span>
+            Safe extra spend this week <span className="font-medium normal-case text-ink-faint">· after your planned costs</span>
           </p>
         </div>
-        <div>
-          <p className="text-3xl font-extrabold tracking-tight text-ink">
-            {balanceKnown ? formatMoney(profile.currentBalance, profile.currency) : "Not provided"}
-          </p>
-          <p className="mt-1 text-xs font-bold uppercase tracking-wide text-ink-soft">Available now</p>
-        </div>
+      </div>
+
+      <div className="mt-5 border-t border-border pt-5">
+        {offTrack ? (
+          <>
+            <p className="flex items-center gap-2 text-sm font-bold text-warn-dark">
+              <span className="h-2 w-2 rounded-full bg-warn" aria-hidden="true" />
+              {actualRunway!.daysShort} days short
+            </p>
+            {suggestedWeeklyReduction !== null ? (
+              <p className="mt-1 text-sm font-medium text-ink-soft">
+                Cut about <span className="font-bold text-ink">{formatMoneyWhole(suggestedWeeklyReduction, profile.currency)}/week</span>{" "}
+                {nextMajorPayment ? "to make it to your next payment." : "to stay on track."}
+              </p>
+            ) : null}
+            {actualRunway!.runOutDate ? (
+              <p className="mt-2 text-xs font-medium text-ink-faint">
+                At this rate, your money could run out around {formatDayMonth(actualRunway!.runOutDate)}.
+              </p>
+            ) : null}
+          </>
+        ) : onTrack ? (
+          <>
+            <p className="flex items-center gap-2 text-sm font-bold text-brand-dark">
+              <span className="h-2 w-2 rounded-full bg-brand" aria-hidden="true" />
+              On track
+            </p>
+            <p className="mt-1 text-sm font-medium text-ink-soft">
+              {nextMajorPayment ? `Covered until your next ${nextMajorPayment.income.source.toLowerCase()} payment.` : "Covered until your target date."}
+            </p>
+          </>
+        ) : balanceKnown ? (
+          <p className="text-xs font-medium text-ink-faint">Add your next payment date to see your full runway.</p>
+        ) : (
+          <p className="text-sm font-medium text-ink-faint">Add your current balance to see your runway.</p>
+        )}
       </div>
 
       {nextMajorPayment || recurringIncomes.length > 0 ? (
@@ -71,39 +116,10 @@ export function BalanceHero({ summary }: { summary: FinancialSummary }) {
         </div>
       ) : null}
 
-      <div className="mt-5 border-t border-border pt-5">
-        {shortfallAmount !== null ? (
-          <>
-            <p className="text-sm font-bold text-caution-dark">Projected shortfall</p>
-            <p className="mt-1 text-2xl font-extrabold text-ink">{formatMoney(shortfallAmount, profile.currency)}</p>
-            {suggestedWeeklyReduction !== null ? (
-              <p className="mt-1 text-sm font-medium text-ink-soft">
-                Cut about <span className="font-bold text-ink">{formatMoneyWhole(suggestedWeeklyReduction, profile.currency)}/week</span> to
-                stay on track.
-              </p>
-            ) : null}
-            {runOutEstimate && gapDays !== null && gapDays > 0 ? (
-              <p className="mt-2 text-xs font-medium text-ink-faint">
-                At this rate, money could run out around {formatDayMonth(runOutEstimate.date)}.
-              </p>
-            ) : null}
-          </>
-        ) : balanceKnown && (nextMajorPayment || summary.horizonSource !== "default") ? (
-          <>
-            <p className="text-sm font-bold text-brand-dark">You&rsquo;re on track</p>
-            {discretionaryCash !== null ? (
-              <p className="mt-1 text-sm font-medium text-ink-soft">
-                {nextMajorPayment ? "Projected buffer at next payment: " : "Projected buffer: "}
-                <span className="font-bold text-ink">{formatMoney(discretionaryCash, profile.currency)}</span>
-              </p>
-            ) : null}
-          </>
-        ) : balanceKnown ? (
-          <p className="text-xs font-medium text-ink-faint">Add your next payment date to see your full runway.</p>
-        ) : (
-          <p className="text-sm font-medium text-ink-faint">Add your current balance to see your runway.</p>
-        )}
-      </div>
+      <p className="mt-3 text-xs font-medium text-ink-faint">
+        {balanceKnown ? formatMoney(profile.currentBalance, profile.currency) : "Not provided"}{" "}
+        <span className="normal-case">available now</span>
+      </p>
     </Card>
   );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  calculateActualRunway,
   calculateCommittedSpend,
   calculateDiscretionaryCash,
   calculateExpectedEssentialSpend,
@@ -13,6 +14,7 @@ import {
   estimateRunOutDate,
   findNextIncome,
   forecastBalance,
+  round2,
   toMonthlyAmount,
   toWeeklyAmount,
 } from "./engine";
@@ -567,6 +569,156 @@ describe("calculateFinancialSummary - recurring income vs the runway horizon (ca
 
     // Defensive guard: never imply anywhere near the whole balance is safe to spend in a single week.
     expect(summary.safeWeeklySpend!).toBeLessThan(profile.currentBalance * 0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// calculateActualRunway - the hero's central "how long does my money
+// ACTUALLY last" figure, compared against the target/"needs to last"
+// horizon (`calculateHorizon`, unchanged). All scenarios below reuse the
+// canonical £3,400 / Maintenance Loan-8-January / £245-per-week fixture
+// above so the actual-runway numbers are checked against the exact same
+// discretionaryCash/shortfall figures already pinned by the regression
+// suite: £245/week burn over the 140-day horizon means the balance drains
+// at a clean £35/day, so "3400 - 35*day < 0" first happens on day 98
+// (day 97 leaves £5, day 98 goes to -£30).
+// ---------------------------------------------------------------------------
+describe("calculateActualRunway", () => {
+  const asOf = new Date("2026-01-01T00:00:00.000Z");
+  const maintenanceLoan = makeIncome({ source: "Maintenance Loan", amount: 3200, date: "2026-05-21T00:00:00.000Z", frequency: "one_off" });
+  const canonicalExpenses = [
+    makeExpense({ name: "Rent", amount: 650, category: "rent", frequency: "monthly" }),
+    makeExpense({ name: "Food", amount: 55, category: "groceries", frequency: "weekly" }),
+    makeExpense({ name: "Going out", amount: 40, category: "going_out", frequency: "weekly" }),
+  ];
+
+  it("no balance -> no fabricated runway", () => {
+    const profile = makeProfile({ currentBalance: 0, balanceKnown: false });
+    const result = calculateActualRunway(profile, canonicalExpenses, [maintenanceLoan], null, 140, "next_income", asOf);
+    expect(result).toBeNull();
+  });
+
+  it("never fabricates a runway against the unconfirmed default horizon", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const result = calculateActualRunway(profile, canonicalExpenses, [], -500, 30, "default", asOf);
+    expect(result).toBeNull();
+  });
+
+  it("actual runway shorter than target: £3,400 against a £245/week burn over 140 days runs dry on day 98, 42 days short", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: canonicalExpenses, incomes: [maintenanceLoan], asOf });
+    const result = calculateActualRunway(profile, canonicalExpenses, [maintenanceLoan], discretionaryCash, 140, "next_income", asOf);
+    expect(result).toEqual({
+      days: 98,
+      meetsTarget: false,
+      runOutDate: new Date(Date.UTC(2026, 3, 9)).toISOString(),
+      daysShort: 42,
+    });
+  });
+
+  it("actual runway exactly reaches target -> meetsTarget true at the exact boundary (discretionaryCash === 0)", () => {
+    const profile = makeProfile({ currentBalance: 4900, balanceKnown: true }); // 4900 - 4900 committed = exactly 0
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: canonicalExpenses, incomes: [maintenanceLoan], asOf });
+    expect(discretionaryCash).toBe(0);
+    const result = calculateActualRunway(profile, canonicalExpenses, [maintenanceLoan], discretionaryCash, 140, "next_income", asOf);
+    expect(result).toEqual({ days: 140, meetsTarget: true, runOutDate: null, daysShort: null });
+  });
+
+  it("actual runway exceeds target -> reports target+ rather than inventing a further precise figure", () => {
+    const profile = makeProfile({ currentBalance: 10000, balanceKnown: true });
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: canonicalExpenses, incomes: [maintenanceLoan], asOf });
+    expect(discretionaryCash).toBeGreaterThan(0);
+    const result = calculateActualRunway(profile, canonicalExpenses, [maintenanceLoan], discretionaryCash, 140, "next_income", asOf);
+    expect(result).toEqual({ days: 140, meetsTarget: true, runOutDate: null, daysShort: null });
+  });
+
+  it("recurring weekly income extends runway (still short of target, but less short)", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const job = makeIncome({ source: "Job", amount: 50, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const incomes = [maintenanceLoan, job];
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: canonicalExpenses, incomes, asOf });
+    const result = calculateActualRunway(profile, canonicalExpenses, incomes, discretionaryCash, 140, "next_income", asOf);
+    expect(result!.meetsTarget).toBe(false);
+    expect(result!.days).toBeGreaterThan(98); // longer than the no-job baseline
+    expect(result!.days).toBeLessThan(140); // still short of target
+    expect(result!.daysShort).toBeLessThan(42); // baseline shortfall was 42 days
+  });
+
+  it("recurring monthly income extends runway (still short of target, but less short)", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const monthlyTopUp = makeIncome({ source: "Allowance", amount: 150, date: "2026-01-15T00:00:00.000Z", frequency: "monthly" });
+    const incomes = [maintenanceLoan, monthlyTopUp];
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: canonicalExpenses, incomes, asOf });
+    const result = calculateActualRunway(profile, canonicalExpenses, incomes, discretionaryCash, 140, "next_income", asOf);
+    expect(result!.meetsTarget).toBe(false);
+    expect(result!.days).toBeGreaterThan(98);
+    expect(result!.days).toBeLessThan(140);
+  });
+
+  it("recurring income can move red -> green (the £200/week job from the canonical regression scenario)", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const job = makeIncome({ source: "Job", amount: 200, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const incomes = [maintenanceLoan, job];
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: canonicalExpenses, incomes, asOf });
+    expect(discretionaryCash).toBe(2500); // pinned by the existing canonical regression suite
+    const result = calculateActualRunway(profile, canonicalExpenses, incomes, discretionaryCash, 140, "next_income", asOf);
+    expect(result).toEqual({ days: 140, meetsTarget: true, runOutDate: null, daysShort: null });
+  });
+
+  it("major horizon does not change because recurring income arrives sooner - only actualRunway.days moves, targetDays stays anchored to the Maintenance Loan", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const job = makeIncome({ source: "Job", amount: 200, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const summaryBefore = calculateFinancialSummary(
+      { profile, incomes: [maintenanceLoan], expenses: canonicalExpenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+    const summaryAfter = calculateFinancialSummary(
+      { profile, incomes: [maintenanceLoan, job], expenses: canonicalExpenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+    expect(summaryBefore.horizonDays).toBe(140);
+    expect(summaryAfter.horizonDays).toBe(140); // the job's 7-day-away next occurrence never redefines the target
+    expect(summaryBefore.actualRunway!.meetsTarget).toBe(false);
+    expect(summaryAfter.actualRunway!.meetsTarget).toBe(true);
+  });
+
+  it("a completed transaction (reflected in currentBalance) shortens the runway", () => {
+    const profileBefore = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const profileAfter = makeProfile({ currentBalance: 3400 - 1500, balanceKnown: true }); // "I just spent £1,500 on a laptop"
+    const dBefore = calculateDiscretionaryCash({ profile: profileBefore, expenses: canonicalExpenses, incomes: [maintenanceLoan], asOf });
+    const dAfter = calculateDiscretionaryCash({ profile: profileAfter, expenses: canonicalExpenses, incomes: [maintenanceLoan], asOf });
+    const before = calculateActualRunway(profileBefore, canonicalExpenses, [maintenanceLoan], dBefore, 140, "next_income", asOf);
+    const after = calculateActualRunway(profileAfter, canonicalExpenses, [maintenanceLoan], dAfter, 140, "next_income", asOf);
+    expect(after!.days).toBeLessThan(before!.days);
+    expect(after!.days).toBe(55); // (3400-1500)=1900 available / £35-a-day burn -> first negative on day 55
+    expect(after!.daysShort).toBeGreaterThan(before!.daysShort!);
+  });
+
+  it("no spending -> sensible, non-fabricated result (survives the whole window, no run-out date invented)", () => {
+    const profile = makeProfile({ currentBalance: 500, balanceKnown: true });
+    const discretionaryCash = calculateDiscretionaryCash({ profile, expenses: [], incomes: [maintenanceLoan], asOf });
+    const result = calculateActualRunway(profile, [], [maintenanceLoan], discretionaryCash, 140, "next_income", asOf);
+    expect(result).toEqual({ days: 140, meetsTarget: true, runOutDate: null, daysShort: null });
+  });
+
+  it("safe weekly spend remains internally consistent with the actual-runway green/red state", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [maintenanceLoan], expenses: canonicalExpenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+    // Red state (shortfall) -> safe weekly spend must be clamped to 0, never negative.
+    expect(summary.actualRunway!.meetsTarget).toBe(false);
+    expect(summary.safeWeeklySpend).toBe(0);
+
+    const job = makeIncome({ source: "Job", amount: 200, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const summaryGreen = calculateFinancialSummary(
+      { profile, incomes: [maintenanceLoan, job], expenses: canonicalExpenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+    // Green state -> safe weekly spend is exactly discretionaryCash spread over the target window.
+    expect(summaryGreen.actualRunway!.meetsTarget).toBe(true);
+    expect(summaryGreen.safeWeeklySpend).toBeCloseTo(round2(summaryGreen.discretionaryCash! / (summaryGreen.horizonDays / 7)), 2);
   });
 });
 
