@@ -11,6 +11,7 @@ const CATEGORY_EMOJI: Record<TipCategory, string> = {
   budgeting: "💡",
   borrowing: "⚠️",
   loan_repayment: "🎓",
+  opportunities: "🧭",
 };
 
 export function MoneyTipCard({ context }: { context: TipContext }) {

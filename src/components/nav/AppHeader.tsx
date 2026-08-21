@@ -6,12 +6,10 @@ import { usePathname } from "next/navigation";
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand";
 import { cx } from "@/lib/cx";
 
-// Add a future "Integrations" tab here - the sticky row below already
-// scrolls horizontally instead of wrapping, so a third tab fits without
-// further layout changes.
 const TABS = [
   { href: "/budget", label: "Budget" },
   { href: "/loan-tracker", label: "Loan Tracker" },
+  { href: "/integrations", label: "Integrations" },
 ] as const;
 
 export function AppHeader({ actions }: { actions?: ReactNode }) {

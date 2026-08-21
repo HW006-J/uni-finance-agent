@@ -17,18 +17,60 @@ function summaryWith(overrides: Parameters<typeof makeProfile>[0] = {}, extra: P
   });
 }
 
+// Official domains this library is allowed to cite - GOV.UK/MoneyHelper for
+// the general library, plus each partner's own official domain for the
+// partner-sourced tips added alongside the Integrations page. No blog, no
+// aggregator, no third-party summary site.
+const OFFICIAL_TIP_DOMAINS = [
+  "gov.uk",
+  "moneyhelper.org.uk",
+  "thehgfoundation.com",
+  "lfbf.org.uk",
+  "harringtonstarr.com",
+];
+
 describe("MONEY_TIPS", () => {
   it("every tip cites an official source and has a real https url", () => {
     for (const tip of MONEY_TIPS) {
       expect(tip.sourceUrl.startsWith("https://")).toBe(true);
       expect(tip.sourceLabel.length).toBeGreaterThan(0);
-      expect(["gov.uk", "moneyhelper.org.uk"].some((domain) => tip.sourceUrl.includes(domain))).toBe(true);
+      expect(OFFICIAL_TIP_DOMAINS.some((domain) => tip.sourceUrl.includes(domain))).toBe(true);
     }
   });
 
   it("has unique ids", () => {
     const ids = MONEY_TIPS.map((t) => t.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("partner-sourced tips carry full source metadata pointing at the partner's own official domain", () => {
+    const partnerTips = MONEY_TIPS.filter((t) =>
+      ["hg-foundation-tech-pathways", "lfbf-young-persons-money-index", "harrington-starr-fintech-careers"].includes(t.id),
+    );
+    expect(partnerTips).toHaveLength(3);
+    for (const tip of partnerTips) {
+      expect(tip.id.length).toBeGreaterThan(0);
+      expect(tip.title.length).toBeGreaterThan(0);
+      expect(tip.body.length).toBeGreaterThan(0);
+      expect(tip.category.length).toBeGreaterThan(0);
+      expect(tip.sourceLabel.length).toBeGreaterThan(0);
+      expect(tip.sourceUrl.startsWith("https://")).toBe(true);
+    }
+    expect(partnerTips.find((t) => t.id === "hg-foundation-tech-pathways")?.sourceUrl).toContain("thehgfoundation.com");
+    expect(partnerTips.find((t) => t.id === "lfbf-young-persons-money-index")?.sourceUrl).toContain("lfbf.org.uk");
+    const harringtonStarrTip = partnerTips.find((t) => t.id === "harrington-starr-fintech-careers");
+    expect(harringtonStarrTip?.sourceUrl).toContain("harringtonstarr.com");
+    // Contextual: eligible during a projected shortfall, same trigger as the existing GOV.UK job-search tip.
+    expect(harringtonStarrTip?.trigger).toBe("shortfall_projected");
+  });
+
+  it("never claims a partner organisation personally recommends/endorses anything (no 'X recommends' phrasing)", () => {
+    const partnerTips = MONEY_TIPS.filter((t) =>
+      ["hg-foundation-tech-pathways", "lfbf-young-persons-money-index", "harrington-starr-fintech-careers"].includes(t.id),
+    );
+    for (const tip of partnerTips) {
+      expect(tip.body.toLowerCase()).not.toMatch(/recommends?|advises?|endorses?/);
+    }
   });
 });
 
@@ -98,6 +140,21 @@ describe("buildTipQueue", () => {
     const firstGeneralIndex = queue.findIndex((t) => !t.trigger);
     const lastContextualIndex = Math.max(...contextualIds.map((id) => queue.findIndex((t) => t.id === id)));
     expect(lastContextualIndex).toBeLessThan(firstGeneralIndex);
+  });
+
+  it("surfaces the Harrington Starr careers tip during a shortfall alongside (not instead of) the existing GOV.UK job-search tip", () => {
+    const summary = summaryWith(
+      { currentBalance: 10, balanceKnown: true },
+      { expenses: [{ id: "e1", profileId: "p1", name: "Rent", amount: 900, category: "rent", frequency: "monthly", nextDueDate: null, active: true, createdAt: "", updatedAt: "" }] },
+    );
+    const queue = buildTipQueue({ page: "budget", summary });
+    const contextualIds = queue.filter((t) => t.trigger === "shortfall_projected").map((t) => t.id);
+    expect(contextualIds).toContain("harrington-starr-fintech-careers");
+    expect(contextualIds).toContain("find-student-work"); // the GOV.UK job route must remain, not be replaced
+    // The established GOV.UK/MoneyHelper tips (priority 8-10) outrank the partner tip (priority 6).
+    const govUkJobIndex = queue.findIndex((t) => t.id === "find-student-work");
+    const harringtonStarrIndex = queue.findIndex((t) => t.id === "harrington-starr-fintech-careers");
+    expect(govUkJobIndex).toBeLessThan(harringtonStarrIndex);
   });
 
   it("has enough eligible tips in every context for 'Next tip' to genuinely rotate rather than repeat", () => {

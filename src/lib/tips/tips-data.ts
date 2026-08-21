@@ -9,7 +9,7 @@
  * last reviewed - see `lastVerified` on each tip.
  */
 
-export type TipCategory = "student_finance" | "budgeting" | "borrowing" | "loan_repayment";
+export type TipCategory = "student_finance" | "budgeting" | "borrowing" | "loan_repayment" | "opportunities";
 
 /** Deterministic situations the dashboard can detect from real stored data - never inferred by the AI. */
 export type TipTrigger =
@@ -159,6 +159,44 @@ export const MONEY_TIPS: MoneyTip[] = [
     sourceUrl: "https://www.gov.uk/student-finance",
     priority: 3,
     lastVerified: "2026-08-14",
+  },
+
+  // ---------------------------------------------------------------------
+  // Partner-sourced tips (see /integrations). Same rules as every tip
+  // above: written and reviewed by a person, paraphrased accurately from
+  // the organisation's own official page, never implying an endorsement
+  // or recommendation the organisation didn't actually make.
+  // ---------------------------------------------------------------------
+  {
+    id: "hg-foundation-tech-pathways",
+    title: "Building a tech career from a non-traditional route?",
+    body: "The Hg Foundation funds education and technology-career programmes for young people from under-represented backgrounds.",
+    category: "opportunities",
+    sourceLabel: "The Hg Foundation — Partnerships",
+    sourceUrl: "https://www.thehgfoundation.com/partnerships",
+    priority: 3,
+    lastVerified: "2026-08-21",
+  },
+  {
+    id: "lfbf-young-persons-money-index",
+    title: "What UK research says about young people and money",
+    body: "LFBF's Young Persons' Money Index tracks financial education and money confidence among UK teenagers, and most say they want to learn more.",
+    category: "budgeting",
+    sourceLabel: "London Foundation for Banking & Finance — Young Persons' Money Index",
+    sourceUrl: "https://www.lfbf.org.uk/research-report/young-persons-money-index-2025-2026/",
+    priority: 3,
+    lastVerified: "2026-08-21",
+  },
+  {
+    id: "harrington-starr-fintech-careers",
+    title: "Looking for income or experience?",
+    body: "Explore fintech roles and career opportunities through Harrington Starr's job search, alongside GOV.UK's general job listings.",
+    category: "opportunities",
+    sourceLabel: "Harrington Starr — Job search",
+    sourceUrl: "https://www.harringtonstarr.com/candidates/job-search/",
+    trigger: "shortfall_projected",
+    priority: 6,
+    lastVerified: "2026-08-21",
   },
 ];
 
