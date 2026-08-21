@@ -21,79 +21,105 @@ describe("BalanceHero - missing balance/horizon never fabricates a runway", () =
     );
     render(<BalanceHero summary={summary} />);
 
-    expect(screen.getByText("—")).toBeInTheDocument();
-    expect(screen.getByText("No upcoming payment on record yet")).toBeInTheDocument();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2); // days-until and safe-to-spend
     expect(screen.getByText("Not provided")).toBeInTheDocument();
     expect(screen.getByText("Add your current balance to see your runway.")).toBeInTheDocument();
     expect(screen.queryByText(/on track/)).not.toBeInTheDocument();
     expect(screen.queryByText("Projected shortfall")).not.toBeInTheDocument();
-    expect(screen.queryByText(/run out around/)).not.toBeInTheDocument();
   });
 });
 
-describe("BalanceHero - on-track runway", () => {
-  const profile = makeProfile({ currentBalance: 5000, emergencyBuffer: 0, balanceKnown: true });
-  const incomes = [makeIncome({ source: "Maintenance Loan", amount: 3200, date: "2026-05-26T00:00:00.000Z", frequency: "one_off" })];
-  const expenses = [makeExpense({ name: "Rent", amount: 50, category: "rent", frequency: "weekly" })];
-  const summary = calculateFinancialSummary(
-    { profile, incomes, expenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
-    asOf,
-  );
+describe("BalanceHero - canonical scenario (£3,400 / Maintenance Loan 8 Jan / £245/week spend)", () => {
+  const maintenanceLoan = makeIncome({ source: "Maintenance Loan", amount: 3200, date: "2026-05-21T00:00:00.000Z", frequency: "one_off" });
+  const canonicalExpenses = [
+    makeExpense({ name: "Rent", amount: 650, category: "rent", frequency: "monthly" }),
+    makeExpense({ name: "Food", amount: 55, category: "groceries", frequency: "weekly" }),
+    makeExpense({ name: "Going out", amount: 40, category: "going_out", frequency: "weekly" }),
+  ];
+  const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
 
-  it("shows the correct days-until-next-payment headline", () => {
-    render(<BalanceHero summary={summary} />);
-    expect(screen.getByText(`${summary.nextIncome!.daysAway} days`)).toBeInTheDocument();
-    expect(screen.getByText("until your next payment")).toBeInTheDocument();
+  describe("before any recurring income", () => {
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [maintenanceLoan], expenses: canonicalExpenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+
+    it("shows the three primary hero metrics: 140 days, £0 safe spend, £3,400 available", () => {
+      render(<BalanceHero summary={summary} />);
+      expect(screen.getByText("140")).toBeInTheDocument();
+      expect(screen.getByText("until next major payment")).toBeInTheDocument();
+      expect(screen.getByText(formatMoney(0, "GBP"))).toBeInTheDocument();
+      expect(screen.getByText(/after your planned costs/)).toBeInTheDocument();
+      expect(screen.getByText(formatMoney(3400, "GBP"))).toBeInTheDocument();
+    });
+
+    it("presents the next major payment line", () => {
+      render(<BalanceHero summary={summary} />);
+      const line = screen.getByText("Next major payment:").closest("p")!;
+      expect(line).toHaveTextContent("£3,200");
+      expect(line).toHaveTextContent("Maintenance Loan");
+    });
+
+    it("shows the simplified shortfall block: amount, one cut sentence, one subtle run-out sentence", () => {
+      render(<BalanceHero summary={summary} />);
+      expect(screen.getByText("Projected shortfall")).toBeInTheDocument();
+      expect(screen.getByText(formatMoney(1500, "GBP"))).toBeInTheDocument();
+      const cutSentence = screen.getByText(/Cut about/).closest("p")!;
+      expect(cutSentence).toHaveTextContent(`Cut about ${formatMoneyWhole(75, "GBP")}/week to stay on track.`);
+      expect(screen.getByText(/At this rate, money could run out around/)).toBeInTheDocument();
+      // The old verbose "N-day gap" phrasing must not reappear per the wording-reduction pass.
+      expect(screen.queryByText(/day gap/)).not.toBeInTheDocument();
+    });
+
+    it("does not show the on-track state alongside the shortfall", () => {
+      render(<BalanceHero summary={summary} />);
+      expect(screen.queryByText(/You.{1,2}re on track/)).not.toBeInTheDocument();
+    });
   });
 
-  it("presents the next payment amount, source and date", () => {
-    render(<BalanceHero summary={summary} />);
-    const nextPaymentLine = screen.getByText("Next payment:").closest("p")!;
-    expect(nextPaymentLine).toHaveTextContent("£3,200");
-    expect(nextPaymentLine).toHaveTextContent("Maintenance Loan");
-  });
+  describe("after adding a £200/week job (the regression scenario)", () => {
+    const job = makeIncome({ source: "Job", amount: 200, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const summary = calculateFinancialSummary(
+      {
+        profile,
+        incomes: [maintenanceLoan, job],
+        expenses: canonicalExpenses,
+        transactions: [],
+        goals: [],
+        fundingAwards: [],
+        incomeReceipts: [],
+      },
+      asOf,
+    );
 
-  it("shows the positive on-track state with a matching safe-weekly-spend figure", () => {
-    render(<BalanceHero summary={summary} />);
-    expect(screen.getByText("You’re on track")).toBeInTheDocument();
-    expect(screen.getByText("Safe to spend this week")).toBeInTheDocument();
-    expect(screen.getByText(formatMoney(summary.safeWeeklySpend!, "GBP"))).toBeInTheDocument();
-    expect(screen.getByText("Projected buffer at next payment")).toBeInTheDocument();
-    expect(screen.getByText(formatMoney(summary.discretionaryCash!, "GBP"))).toBeInTheDocument();
-  });
-});
+    it("keeps the runway anchored to the 140-day Maintenance Loan horizon, never collapsing to 7 days", () => {
+      render(<BalanceHero summary={summary} />);
+      expect(screen.getByText("140")).toBeInTheDocument();
+      expect(screen.queryByText("7")).not.toBeInTheDocument();
+    });
 
-describe("BalanceHero - projected shortfall", () => {
-  const profile = makeProfile({ currentBalance: 300, emergencyBuffer: 0, balanceKnown: true });
-  const incomes = [makeIncome({ source: "Maintenance Loan", amount: 3200, date: "2026-05-26T00:00:00.000Z", frequency: "one_off" })];
-  const expenses = [makeExpense({ name: "Rent", amount: 100, category: "rent", frequency: "weekly" })];
-  const summary = calculateFinancialSummary(
-    { profile, incomes, expenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
-    asOf,
-  );
+    it("shows the job as a separate recurring-income chip, not as the next major payment", () => {
+      render(<BalanceHero summary={summary} />);
+      expect(screen.getByText(/Job/)).toBeInTheDocument();
+      expect(screen.getByText(/\+£200/)).toBeInTheDocument();
+      const majorPaymentLine = screen.getByText("Next major payment:").closest("p")!;
+      expect(majorPaymentLine).toHaveTextContent("Maintenance Loan");
+      expect(majorPaymentLine).not.toHaveTextContent("Job");
+    });
 
-  it("has a real shortfall and run-out projection in this fixture", () => {
-    expect(summary.shortfallAmount).not.toBeNull();
-    expect(summary.suggestedWeeklyReduction).not.toBeNull();
-    expect(summary.runOutEstimate).not.toBeNull();
-  });
+    it("moves to an on-track state with a sensible (not fabricated) safe-spend figure", () => {
+      render(<BalanceHero summary={summary} />);
+      expect(screen.getByText(/You.{1,2}re on track/)).toBeInTheDocument();
+      expect(screen.getByText(formatMoney(125, "GBP"))).toBeInTheDocument(); // safe to spend this week
+      expect(screen.getByText(formatMoney(2500, "GBP"))).toBeInTheDocument(); // projected buffer
+      expect(screen.queryByText("Projected shortfall")).not.toBeInTheDocument();
+    });
 
-  it("shows the projected-shortfall figure and the weekly reduction, matching the engine's own numbers", () => {
-    render(<BalanceHero summary={summary} />);
-    expect(screen.getByText("Projected shortfall")).toBeInTheDocument();
-    expect(screen.getByText(formatMoney(summary.shortfallAmount!, "GBP"))).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(formatMoneyWhole(summary.suggestedWeeklyReduction!, "GBP") + "/week"))).toBeInTheDocument();
-  });
-
-  it("shows the run-out date and the day gap before the next payment", () => {
-    render(<BalanceHero summary={summary} />);
-    const gapDays = summary.nextIncome!.daysAway - summary.runOutEstimate!.days;
-    expect(screen.getByText(new RegExp(`${gapDays}-day gap`))).toBeInTheDocument();
-    expect(screen.getByText(/run out around/)).toBeInTheDocument();
-  });
-
-  it("does not show the on-track state at the same time", () => {
-    render(<BalanceHero summary={summary} />);
-    expect(screen.queryByText("You’re on track")).not.toBeInTheDocument();
+    it("never implies anywhere near the whole balance is safe to spend in a week", () => {
+      render(<BalanceHero summary={summary} />);
+      // The originally-reported (buggy) figure must never appear anywhere on the page.
+      expect(screen.queryByText(formatMoney(3155, "GBP"))).not.toBeInTheDocument();
+      expect(summary.safeWeeklySpend!).toBeLessThan(profile.currentBalance * 0.5);
+    });
   });
 });

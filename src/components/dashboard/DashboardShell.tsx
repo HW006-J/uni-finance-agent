@@ -32,7 +32,8 @@ function isEmptyProfile(summary: FinancialSummary): boolean {
     summary.budgetCategories.length === 0 &&
     summary.recentTransactions.length === 0 &&
     summary.goals.length === 0 &&
-    summary.nextIncome === null &&
+    summary.nextMajorPayment === null &&
+    summary.recurringIncomes.length === 0 &&
     summary.fundingAwards.length === 0
   );
 }
@@ -243,7 +244,7 @@ export function DashboardShell({
         </div>
 
         <div className="lg:col-span-1">
-          <div className="lg:sticky lg:top-8">
+          <div className="lg:sticky lg:top-24 lg:h-[calc(100vh-7.5rem)]">
             <ChatPanel
               messages={messages}
               onSend={handleSend}

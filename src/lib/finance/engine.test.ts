@@ -366,7 +366,7 @@ describe("calculateFinancialSummary", () => {
       asOf,
     );
 
-    expect(summary.nextIncome?.income.source).toBe("Student Finance");
+    expect(summary.nextMajorPayment?.income.source).toBe("Student Finance");
     expect(summary.upcomingCommitments.map((c) => c.name)).toEqual(["Textbook", "Phone contract"]);
     expect(summary.budgetCategories.find((c) => c.category === "rent")?.weeklyAmount).toBeCloseTo(150, 2);
     expect(summary.recentTransactions).toHaveLength(8);
@@ -386,7 +386,7 @@ describe("calculateFinancialSummary", () => {
     expect(summary.discretionaryCash).toBeNull();
     expect(summary.safeWeeklySpend).toBeNull();
     expect(summary.forecast30d).toBeNull();
-    expect(summary.nextIncome).toBeNull();
+    expect(summary.nextMajorPayment).toBeNull();
     expect(summary.upcomingCommitments).toEqual([]);
     expect(summary.budgetCategories).toEqual([]);
     expect(summary.recentTransactions).toEqual([]);
@@ -477,31 +477,124 @@ describe("calculateFinancialSummary", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Regression: a recurring weekly job income must never collapse the runway
+// horizon down to its own next occurrence, and must reduce (not replace)
+// the net burn rate over the real horizon. This is the exact canonical
+// scenario from manual testing that exposed the bug: before the fix, adding
+// "I make £200 every week from a weekly job" to the £3,400/8-January
+// scenario changed the hero to "7 days until your next payment" and
+// implied ~£3,155 was safe to spend that week.
+// ---------------------------------------------------------------------------
+describe("calculateFinancialSummary - recurring income vs the runway horizon (canonical bug scenario)", () => {
+  const asOf = new Date("2026-01-01T00:00:00.000Z");
+  // Jan 1 -> May 21 is exactly 140 days (both UTC midnights).
+  const maintenanceLoan = makeIncome({
+    source: "Maintenance Loan",
+    amount: 3200,
+    date: "2026-05-21T00:00:00.000Z",
+    frequency: "one_off",
+  });
+  const canonicalExpenses = [
+    makeExpense({ name: "Rent", amount: 650, category: "rent", frequency: "monthly" }),
+    makeExpense({ name: "Food", amount: 55, category: "groceries", frequency: "weekly" }),
+    makeExpense({ name: "Going out", amount: 40, category: "going_out", frequency: "weekly" }),
+  ];
+
+  it("before any recurring income: 140-day horizon, £1,500 shortfall, £75/week cut, £0 safe spend", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const summary = calculateFinancialSummary(
+      { profile, incomes: [maintenanceLoan], expenses: canonicalExpenses, transactions: [], goals: [], fundingAwards: [], incomeReceipts: [] },
+      asOf,
+    );
+
+    expect(summary.horizonSource).toBe("next_income");
+    expect(summary.horizonDays).toBe(140);
+    expect(summary.nextMajorPayment?.income.source).toBe("Maintenance Loan");
+    expect(summary.shortfallAmount).toBe(1500);
+    expect(summary.suggestedWeeklyReduction).toBe(75);
+    expect(summary.safeWeeklySpend).toBe(0);
+  });
+
+  it("after adding a £200/week job: horizon stays 140 days anchored to the Maintenance Loan, not 7 days", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const job = makeIncome({ source: "Job", amount: 200, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const summary = calculateFinancialSummary(
+      {
+        profile,
+        incomes: [maintenanceLoan, job],
+        expenses: canonicalExpenses,
+        transactions: [],
+        goals: [],
+        fundingAwards: [],
+        incomeReceipts: [],
+      },
+      asOf,
+    );
+
+    // The regression: this must stay anchored to the Maintenance Loan, never collapse to the job's 7-day next occurrence.
+    expect(summary.horizonSource).toBe("next_income");
+    expect(summary.horizonDays).toBe(140);
+    expect(summary.nextMajorPayment?.income.source).toBe("Maintenance Loan");
+    expect(summary.nextMajorPayment?.daysAway).toBe(140);
+  });
+
+  it("after adding the job: recurring income is listed separately and offsets the burn rate to a sensible, non-fabricated figure", () => {
+    const profile = makeProfile({ currentBalance: 3400, balanceKnown: true });
+    const job = makeIncome({ source: "Job", amount: 200, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" });
+    const summary = calculateFinancialSummary(
+      {
+        profile,
+        incomes: [maintenanceLoan, job],
+        expenses: canonicalExpenses,
+        transactions: [],
+        goals: [],
+        fundingAwards: [],
+        incomeReceipts: [],
+      },
+      asOf,
+    );
+
+    expect(summary.recurringIncomes).toHaveLength(1);
+    expect(summary.recurringIncomes[0].source).toBe("Job");
+
+    // £245/week burn - £200/week job = £45/week net, over 20 weeks = £900; 3400 - 900 = 2500.
+    expect(summary.discretionaryCash).toBe(2500);
+    expect(summary.safeWeeklySpend).toBe(125);
+    // The shortfall clears entirely - the £200/week job comfortably covers most of the £245/week burn.
+    expect(summary.shortfallAmount).toBeNull();
+    expect(summary.suggestedWeeklyReduction).toBeNull();
+
+    // Defensive guard: never imply anywhere near the whole balance is safe to spend in a single week.
+    expect(summary.safeWeeklySpend!).toBeLessThan(profile.currentBalance * 0.5);
+  });
+});
+
 describe("estimateRunOutDate", () => {
   const asOf = new Date("2026-01-01T00:00:00.000Z");
 
   it("returns null when the balance isn't known", () => {
     const profile = makeProfile({ currentBalance: 1000, balanceKnown: false });
     const expenses = [makeExpense({ amount: 100, frequency: "weekly" })];
-    expect(estimateRunOutDate(profile, expenses, "next_income", asOf)).toBeNull();
+    expect(estimateRunOutDate(profile, expenses, [], "next_income", asOf)).toBeNull();
   });
 
   it("returns null against the unconfirmed default horizon", () => {
     const profile = makeProfile({ currentBalance: 1000, balanceKnown: true });
     const expenses = [makeExpense({ amount: 100, frequency: "weekly" })];
-    expect(estimateRunOutDate(profile, expenses, "default", asOf)).toBeNull();
+    expect(estimateRunOutDate(profile, expenses, [], "default", asOf)).toBeNull();
   });
 
   it("returns null when there's no recurring spending to project a rate from", () => {
     const profile = makeProfile({ currentBalance: 1000, balanceKnown: true });
-    expect(estimateRunOutDate(profile, [], "next_income", asOf)).toBeNull();
+    expect(estimateRunOutDate(profile, [], [], "next_income", asOf)).toBeNull();
   });
 
   it("projects a run-out date from the buffer-adjusted balance at the current weekly committed-spend rate", () => {
     const profile = makeProfile({ currentBalance: 1000, emergencyBuffer: 100, balanceKnown: true });
     const expenses = [makeExpense({ amount: 90, frequency: "weekly" })];
     // (1000 - 100) available / 90 per week * 7 days = 70 days.
-    const result = estimateRunOutDate(profile, expenses, "next_income", asOf);
+    const result = estimateRunOutDate(profile, expenses, [], "next_income", asOf);
     expect(result).not.toBeNull();
     expect(result!.days).toBe(70);
     expect(new Date(result!.date).getTime()).toBeGreaterThan(asOf.getTime());
@@ -510,7 +603,7 @@ describe("estimateRunOutDate", () => {
   it("reports zero days when the buffer already exceeds the current balance", () => {
     const profile = makeProfile({ currentBalance: 50, emergencyBuffer: 100, balanceKnown: true });
     const expenses = [makeExpense({ amount: 90, frequency: "weekly" })];
-    const result = estimateRunOutDate(profile, expenses, "next_income", asOf);
+    const result = estimateRunOutDate(profile, expenses, [], "next_income", asOf);
     expect(result).toEqual({ days: 0, date: asOf.toISOString() });
   });
 
@@ -518,8 +611,33 @@ describe("estimateRunOutDate", () => {
     const profile = makeProfile({ currentBalance: 700, emergencyBuffer: null, balanceKnown: true });
     const expenses = [makeExpense({ amount: 700, frequency: "weekly" })];
     // 700 available / 700 per week * 7 days = 7 days.
-    const result = estimateRunOutDate(profile, expenses, "next_income", asOf);
+    const result = estimateRunOutDate(profile, expenses, [], "next_income", asOf);
     expect(result!.days).toBe(7);
+  });
+
+  it("nets recurring income off the burn rate before projecting a run-out date", () => {
+    const profile = makeProfile({ currentBalance: 1000, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 100, frequency: "weekly" })];
+    const incomes = [makeIncome({ source: "Job", amount: 40, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" })];
+    // Net burn is 100 - 40 = 60/week -> 1000 / 60 * 7 = ~117 days, not 70.
+    const result = estimateRunOutDate(profile, expenses, incomes, "next_income", asOf);
+    expect(result!.days).toBe(Math.round((1000 / 60) * 7));
+  });
+
+  it("returns null (nothing to project) when recurring income covers or exceeds the burn rate", () => {
+    const profile = makeProfile({ currentBalance: 1000, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 100, frequency: "weekly" })];
+    const incomes = [makeIncome({ source: "Job", amount: 100, date: "2026-01-08T00:00:00.000Z", frequency: "weekly" })];
+    expect(estimateRunOutDate(profile, expenses, incomes, "next_income", asOf)).toBeNull();
+  });
+
+  it("ignores a MAJOR income when netting off the burn rate - only recurring income counts", () => {
+    const profile = makeProfile({ currentBalance: 1000, emergencyBuffer: 100, balanceKnown: true });
+    const expenses = [makeExpense({ amount: 90, frequency: "weekly" })];
+    const majorIncome = [makeIncome({ source: "Maintenance Loan", amount: 3200, date: "2026-06-01T00:00:00.000Z", frequency: "one_off" })];
+    // Same 70-day result as the plain committed-spend-only test above - the major income must not net off the rate.
+    const result = estimateRunOutDate(profile, expenses, majorIncome, "next_income", asOf);
+    expect(result!.days).toBe(70);
   });
 });
 

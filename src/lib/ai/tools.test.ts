@@ -118,6 +118,19 @@ describe("executeTool", () => {
     expect(result.data.result).toMatchObject({ status: "unknown_balance", balanceKnown: false });
   });
 
+  it("check_affordability is read-only - a hypothetical question never logs a transaction or mutates any state", async () => {
+    repoMocks.getFinancialState.mockResolvedValue(
+      emptyState({ profile: makeProfile({ currentBalance: 1000, emergencyBuffer: 0, balanceKnown: true }) }),
+    );
+
+    await executeTool("check_affordability", { purchaseAmount: 500, description: "a car" }, { profileId: "p1" });
+
+    expect(repoMocks.logTransaction).not.toHaveBeenCalled();
+    expect(repoMocks.setCurrentBalance).not.toHaveBeenCalled();
+    expect(repoMocks.addOrUpdateExpense).not.toHaveBeenCalled();
+    expect(repoMocks.addOrUpdateIncome).not.toHaveBeenCalled();
+  });
+
   it("add_or_update_expense forwards fields through to the repository upsert", async () => {
     repoMocks.addOrUpdateExpense.mockResolvedValue(makeExpense({ name: "Rent", amount: 700, category: "rent", frequency: "monthly" }));
 

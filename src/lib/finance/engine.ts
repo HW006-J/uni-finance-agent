@@ -39,9 +39,18 @@ export function round2(value: number): number {
   return rounded === 0 ? 0 : rounded; // normalize -0 to 0
 }
 
+/**
+ * UTC-safe day addition - see `addMonthClamped` below for why mixing in
+ * local-timezone getters/setters is unsafe here. Using local `setDate`
+ * previously meant a window spanning a DST transition (e.g. the UK's
+ * clocks-forward in late March) could silently drop or double-count the
+ * final day's occurrence, since JS normalizes `setDate` to the correct
+ * local calendar day but shifts the underlying UTC instant by less/more
+ * than a whole number of days across the transition.
+ */
 function addDays(date: Date, days: number): Date {
   const d = new Date(date);
-  d.setDate(d.getDate() + days);
+  d.setUTCDate(d.getUTCDate() + days);
   return d;
 }
 
@@ -206,7 +215,35 @@ export interface NextIncome {
   daysAway: number;
 }
 
-/** The soonest upcoming income event, or null if none is known/future. */
+/**
+ * Splits incomes into two kinds that must NEVER be treated the same way:
+ *
+ * - "Major" income (`one_off`, `termly`) - a big, infrequent, plannable
+ *   event like a Maintenance Loan instalment or a term funding payment.
+ *   This is the only kind of income allowed to anchor the budgeting
+ *   horizon (see `calculateHorizon`) or be shown as the headline
+ *   "next payment" - it's the milestone a runway plan is actually built
+ *   around.
+ * - "Recurring" income (`weekly`, `monthly`) - a steady wage/allowance.
+ *   This offsets the burn rate DURING a runway period (see
+ *   `calculateDiscretionaryCash`) but must never collapse the horizon
+ *   itself down to its next occurrence - a weekly job payment 7 days away
+ *   does not mean the student's whole financial plan only needs to last
+ *   7 days.
+ *
+ * This distinction is the fix for a real bug: before it existed, a
+ * recurring £200/week job income made `findNextIncome` (used for both the
+ * horizon and the hero) return the job's next 7-day occurrence, which
+ * collapsed the entire runway horizon to "7 days" and made
+ * `calculateSafeWeeklySpend` divide nearly the whole balance by less than
+ * one week - implying almost the entire balance was safe to spend
+ * immediately. See `calculateHorizon` and `calculateDiscretionaryCash`.
+ */
+export function isMajorIncomeFrequency(frequency: RecurrenceFrequency): boolean {
+  return frequency === "one_off" || frequency === "termly";
+}
+
+/** The soonest upcoming income event across ALL incomes (major and recurring alike), or null if none is known/future. */
 export function findNextIncome(incomes: Income[], asOf: Date = new Date()): NextIncome | null {
   const candidates = incomes
     .map((income) => ({ income, occursOn: getNextOccurrenceDate(income.date, income.frequency, asOf) }))
@@ -221,6 +258,16 @@ export function findNextIncome(incomes: Income[], asOf: Date = new Date()): Next
     occursOn: soonest.occursOn.toISOString(),
     daysAway: Math.max(0, diffDays(soonest.occursOn, asOf)),
   };
+}
+
+/**
+ * The soonest upcoming MAJOR income event only (see `isMajorIncomeFrequency`)
+ * - the one that's allowed to anchor the runway horizon and be shown as the
+ * hero's "next payment". A recurring weekly/monthly income never appears
+ * here, however soon its next occurrence is.
+ */
+export function findNextMajorIncome(incomes: Income[], asOf: Date = new Date()): NextIncome | null {
+  return findNextIncome(incomes.filter((i) => isMajorIncomeFrequency(i.frequency)), asOf);
 }
 
 /**
@@ -247,14 +294,20 @@ export interface HorizonInfo {
   horizonDate: string;
 }
 
-/** Resolves the budgeting horizon per the priority above. Never invents a date the student didn't (directly or via a stored award/income) provide. */
+/**
+ * Resolves the budgeting horizon per the priority above. Never invents a
+ * date the student didn't (directly or via a stored award/income) provide.
+ * Priority 2 deliberately looks only at MAJOR income (see
+ * `isMajorIncomeFrequency`) - a recurring weekly/monthly income must never
+ * collapse the horizon down to its next occurrence.
+ */
 export function calculateHorizon(input: HorizonInput, asOf: Date = new Date()): HorizonInfo {
   const explicit = input.profile.budgetHorizonDate ? new Date(input.profile.budgetHorizonDate) : null;
   if (explicit && !Number.isNaN(explicit.getTime()) && explicit > asOf) {
     return { days: Math.max(1, diffDays(explicit, asOf)), source: "explicit", horizonDate: explicit.toISOString() };
   }
 
-  const next = findNextIncome(input.incomes, asOf);
+  const next = findNextMajorIncome(input.incomes, asOf);
   if (next) {
     const occursOn = new Date(next.occursOn);
     return { days: Math.max(1, diffDays(occursOn, asOf)), source: "next_income", horizonDate: next.occursOn };
@@ -294,10 +347,20 @@ export interface DiscretionaryCashInput {
 
 /**
  * Cash genuinely free to spend on optional/unplanned purchases before the
- * next known income arrives, after reserving the emergency buffer and every
- * committed bill (essential or not) expected to fall due in that window.
- * Returns 0 (with the caller expected to check `profile.balanceKnown`)
- * rather than a misleading negative/zero figure when balance isn't known.
+ * runway horizon (see `calculateHorizon`) is reached: current balance, plus
+ * every RECURRING income (weekly/monthly - see `isMajorIncomeFrequency`)
+ * expected to land in that window, minus the emergency buffer and every
+ * committed bill (essential or not) expected to fall due in the same
+ * window. Returns 0 (with the caller expected to check
+ * `profile.balanceKnown`) rather than a misleading negative/zero figure
+ * when balance isn't known.
+ *
+ * Deliberately excludes MAJOR income (one-off/termly) from this addition -
+ * the soonest major income either IS the horizon boundary itself (so
+ * counting it here would mean spending against a payment that hasn't
+ * landed yet) or is further out than the horizon and irrelevant to this
+ * window. Only a steady recurring income stream genuinely reduces the net
+ * burn rate during the plan.
  */
 export function calculateDiscretionaryCash(input: DiscretionaryCashInput): number {
   const asOf = input.asOf ?? new Date();
@@ -306,11 +369,14 @@ export function calculateDiscretionaryCash(input: DiscretionaryCashInput): numbe
     (sum, e) => sum + sumExpenseContribution(e, asOf, horizonDays),
     0,
   );
+  const recurringIncomeOverHorizon = input.incomes
+    .filter((i) => !isMajorIncomeFrequency(i.frequency))
+    .reduce((sum, i) => sum + sumIncomeContribution(i, asOf, horizonDays), 0);
   const buffer = input.profile.emergencyBuffer ?? 0;
-  return round2(input.profile.currentBalance - buffer - committedOverHorizon);
+  return round2(input.profile.currentBalance - buffer - committedOverHorizon + recurringIncomeOverHorizon);
 }
 
-/** Discretionary cash spread evenly across the weeks until the next income. */
+/** Discretionary cash (see `calculateDiscretionaryCash`) spread evenly across the weeks until the runway horizon. This is SAFE ADDITIONAL spend on top of already-planned committed/essential costs, not total weekly spending power. */
 export function calculateSafeWeeklySpend(input: DiscretionaryCashInput): number {
   const asOf = input.asOf ?? new Date();
   const discretionary = calculateDiscretionaryCash(input);
@@ -545,27 +611,36 @@ export interface RunOutEstimate {
 }
 
 /**
- * Only meaningful once the student has a known balance, some recurring
- * spending on record, and a confirmed (non-default) budgeting horizon -
- * otherwise there's no real "current spending rate" or deadline to project
- * against, so this returns null rather than inventing a date. Mirrors the
- * same gating `calculateShortfallInsight` uses for `horizonSource`.
+ * Only meaningful once the student has a known balance, a genuinely
+ * positive NET weekly burn rate (committed spend minus recurring income -
+ * see `isMajorIncomeFrequency`), and a confirmed (non-default) budgeting
+ * horizon - otherwise there's no real depletion rate or deadline to project
+ * against, so this returns null rather than inventing a date. A recurring
+ * income that covers or exceeds spending correctly makes this return null:
+ * the balance isn't depleting at a steady rate, so there's nothing honest
+ * to project. Mirrors the same gating `calculateShortfallInsight` uses for
+ * `horizonSource`.
  */
 export function estimateRunOutDate(
   profile: Profile,
   expenses: Expense[],
+  incomes: Income[],
   horizonSource: HorizonSource,
   asOf: Date = new Date(),
 ): RunOutEstimate | null {
   if (!profile.balanceKnown || horizonSource === "default") return null;
 
-  const weeklyRate = calculateCommittedSpend(expenses).weekly;
-  if (weeklyRate <= 0) return null;
+  const weeklyBurn = calculateCommittedSpend(expenses).weekly;
+  const weeklyRecurringIncome = incomes
+    .filter((i) => !isMajorIncomeFrequency(i.frequency))
+    .reduce((sum, i) => sum + toWeeklyAmount(i.amount, i.frequency), 0);
+  const netWeeklyBurn = round2(weeklyBurn - weeklyRecurringIncome);
+  if (netWeeklyBurn <= 0) return null;
 
   const available = round2(profile.currentBalance - (profile.emergencyBuffer ?? 0));
   if (available <= 0) return { days: 0, date: asOf.toISOString() };
 
-  const days = Math.round((available / weeklyRate) * 7);
+  const days = Math.round((available / netWeeklyBurn) * 7);
   return { days, date: addDays(asOf, days).toISOString() };
 }
 
@@ -604,7 +679,10 @@ export interface FinancialSummary {
   horizonDays: number;
   horizonSource: HorizonSource;
   horizonDate: string;
-  nextIncome: NextIncome | null;
+  /** The next MAJOR payment only (see `isMajorIncomeFrequency`) - the runway anchor. Never a recurring weekly/monthly income, however soon. */
+  nextMajorPayment: NextIncome | null;
+  /** Recurring (weekly/monthly) incomes on record - shown separately from `nextMajorPayment` and folded into `discretionaryCash`/`safeWeeklySpend`, never used to anchor the horizon. */
+  recurringIncomes: Income[];
   upcomingCommitments: UpcomingCommitment[];
   budgetCategories: BudgetCategoryBreakdown[];
   recentTransactions: Transaction[];
@@ -664,11 +742,12 @@ export function calculateFinancialSummary(state: FinancialState, asOf: Date = ne
     safeWeeklySpend: profile.balanceKnown ? calculateSafeWeeklySpend(engineInput) : null,
     shortfallAmount: shortfall.shortfallAmount,
     suggestedWeeklyReduction: shortfall.suggestedWeeklyReduction,
-    runOutEstimate: estimateRunOutDate(profile, expenses, horizon.source, asOf),
+    runOutEstimate: estimateRunOutDate(profile, expenses, incomes, horizon.source, asOf),
     horizonDays: horizon.days,
     horizonSource: horizon.source,
     horizonDate: horizon.horizonDate,
-    nextIncome: findNextIncome(incomes, asOf),
+    nextMajorPayment: findNextMajorIncome(incomes, asOf),
+    recurringIncomes: incomes.filter((i) => !isMajorIncomeFrequency(i.frequency)),
     upcomingCommitments,
     budgetCategories,
     recentTransactions,

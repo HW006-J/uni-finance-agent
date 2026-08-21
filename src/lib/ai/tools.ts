@@ -90,7 +90,7 @@ const frequency = z.enum(RECURRENCE_FREQUENCIES).describe("How often this recurs
 const getFinancialSummary: ToolDefinition<Record<string, never>> = {
   name: "get_financial_summary",
   description:
-    "Get the student's full current financial picture: balance, committed spend, discretionary cash, safe weekly spend, next income, upcoming bills, budget categories and recent transactions. Call this whenever you need context before answering a question.",
+    "Get the student's full current financial picture: balance, committed spend, discretionary cash, safe weekly spend, next major payment (a Maintenance Loan instalment or similar - never a recurring weekly/monthly income), recurring incomes, upcoming bills, budget categories and recent transactions. Call this whenever you need context before answering a question.",
   schema: z.object({}),
   execute: async (_args, ctx) => {
     const state = await getFinancialState(ctx.profileId);

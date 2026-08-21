@@ -6,6 +6,9 @@ import { usePathname } from "next/navigation";
 import { PRODUCT_NAME, PRODUCT_TAGLINE } from "@/lib/brand";
 import { cx } from "@/lib/cx";
 
+// Add a future "Integrations" tab here - the sticky row below already
+// scrolls horizontally instead of wrapping, so a third tab fits without
+// further layout changes.
 const TABS = [
   { href: "/budget", label: "Budget" },
   { href: "/loan-tracker", label: "Loan Tracker" },
@@ -15,13 +18,13 @@ export function AppHeader({ actions }: { actions?: ReactNode }) {
   const pathname = usePathname();
 
   return (
-    <header className="flex flex-wrap items-center justify-between gap-4">
+    <header className="sticky top-0 z-40 flex flex-wrap items-center justify-between gap-4 border-b border-border bg-cream py-3">
       <div>
-        <h1 className="text-2xl font-extrabold text-ink">{PRODUCT_NAME}</h1>
-        <p className="text-sm text-ink-soft">{PRODUCT_TAGLINE}</p>
+        <h1 className="text-xl font-extrabold text-ink">{PRODUCT_NAME}</h1>
+        <p className="text-xs text-ink-soft">{PRODUCT_TAGLINE}</p>
       </div>
 
-      <nav className="flex items-center gap-1 rounded-2xl bg-cream-dark p-1" aria-label="Main">
+      <nav className="flex max-w-full items-center gap-1 overflow-x-auto rounded-2xl bg-cream-dark p-1" aria-label="Main">
         {TABS.map((tab) => {
           const active = pathname === tab.href || pathname?.startsWith(`${tab.href}/`);
           return (
@@ -29,7 +32,7 @@ export function AppHeader({ actions }: { actions?: ReactNode }) {
               key={tab.href}
               href={tab.href}
               className={cx(
-                "rounded-xl px-4 py-2 text-sm font-bold transition-colors",
+                "shrink-0 rounded-xl px-4 py-2 text-sm font-bold transition-colors",
                 active ? "bg-surface text-brand-dark shadow-tactile-sm" : "text-ink-soft hover:text-ink",
               )}
             >

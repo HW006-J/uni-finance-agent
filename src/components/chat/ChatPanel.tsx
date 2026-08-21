@@ -57,7 +57,7 @@ export function ChatPanel({
         ) : null}
       </div>
 
-      <div ref={scrollRef} className="mt-4 flex-1 space-y-4 overflow-y-auto pr-1" style={{ maxHeight: 480, minHeight: 280 }}>
+      <div ref={scrollRef} className="mt-4 min-h-[200px] max-h-[480px] flex-1 space-y-4 overflow-y-auto pr-1 lg:max-h-none">
         {messages.length === 0 ? (
           <p className="text-sm text-ink-soft">Try: &ldquo;Can I afford £80 this weekend?&rdquo;</p>
         ) : (

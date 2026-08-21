@@ -36,7 +36,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "check-payment-dates",
     title: "Know your exact payment dates",
-    body: "Maintenance Loan instalments are paid directly to your bank account once you've registered - the exact dates are in your online Student Finance account. Tell Runway each real date so it can budget accurately.",
+    body: "Your exact instalment dates are in your online Student Finance account - tell Runway each one for an accurate plan.",
     category: "student_finance",
     sourceLabel: "GOV.UK — Student finance for undergraduates",
     sourceUrl: "https://www.gov.uk/student-finance/new-fulltime-students",
@@ -47,7 +47,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "three-instalments",
     title: "Paid in instalments, not one lump sum",
-    body: "A Maintenance Loan is normally paid in three instalments, at the start of each term - not as one payment for the whole year. Add each actual instalment as you receive its date so the numbers stay accurate.",
+    body: "A Maintenance Loan usually arrives in three instalments, one per term - not all at once.",
     category: "student_finance",
     sourceLabel: "GOV.UK — Student finance for undergraduates",
     sourceUrl: "https://www.gov.uk/student-finance/new-fulltime-students",
@@ -58,7 +58,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "find-student-work",
     title: "Want some extra breathing room?",
-    body: "A part-time job could give your weekly budget more flexibility without relying on borrowing.",
+    body: "A part-time job can ease your weekly budget without relying on borrowing.",
     category: "student_finance",
     sourceLabel: "GOV.UK — Find a job",
     sourceUrl: "https://www.gov.uk/jobsearch",
@@ -69,7 +69,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "university-support",
     title: "Money getting tight? Your university may be able to help",
-    body: "Universities may offer hardship funds, bursaries or other support if you're struggling with living costs - and you usually don't have to pay it back.",
+    body: "Your university may offer hardship funds or bursaries if money gets tight.",
     category: "student_finance",
     sourceLabel: "GOV.UK — Extra money from your university or college",
     sourceUrl: "https://www.gov.uk/extra-money-university-college-study",
@@ -80,7 +80,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "high-cost-borrowing",
     title: "Be careful with expensive short-term borrowing",
-    body: "Some forms of short-term credit can become expensive very quickly. Check the total cost and cheaper alternatives - an interest-free overdraft buffer, a university hardship fund, or extra Student Finance support - before borrowing.",
+    body: "Short-term credit can get expensive fast - check cheaper options like an overdraft buffer or a hardship fund first.",
     category: "borrowing",
     sourceLabel: "MoneyHelper — Credit",
     sourceUrl: "https://www.moneyhelper.org.uk/en/everyday-money/credit",
@@ -91,7 +91,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "loan-not-like-bank-loan",
     title: "Your student loan isn't like a normal bank loan",
-    body: "How much is taken from your pay depends mainly on your income, not simply how large your loan balance is - and anything left over is eventually written off, not chased forever.",
+    body: "Repayments depend on your income, not your balance - and anything left over is eventually written off.",
     category: "loan_repayment",
     sourceLabel: "GOV.UK — How much you repay",
     sourceUrl: "https://www.gov.uk/repaying-your-student-loan/what-you-pay",
@@ -102,7 +102,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "check-your-plan",
     title: "Not sure which repayment rules apply to you?",
-    body: "Which rules apply depends on when and where you started your course. This tracker makes a best guess from your course start date, but you can always confirm the exact rules in your Student Finance account.",
+    body: "This tracker infers your plan from your course start date - confirm it in your Student Finance account.",
     category: "loan_repayment",
     sourceLabel: "GOV.UK — Repaying your student loan",
     sourceUrl: "https://www.gov.uk/repaying-your-student-loan",
@@ -113,7 +113,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "budget-basics",
     title: "Match income to outgoings, weekly or monthly",
-    body: "A simple rule that works: make sure your income is equal to or more than your outgoings on a weekly or monthly basis - essentials first, then work out what's safe to spend on going out.",
+    body: "Cover essentials first, then work out what's safe to spend on going out.",
     category: "budgeting",
     sourceLabel: "MoneyHelper — Budgeting for college or university",
     sourceUrl: "https://www.moneyhelper.org.uk/en/family-and-care/student-and-graduate-money/budgeting-for-college-or-university",
@@ -123,7 +123,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "overdraft-buffer",
     title: "An overdraft isn't free money",
-    body: "An interest-free student overdraft can be a useful buffer, but leaning on it regularly can cause money difficulties after you graduate. Treat it as a safety net, not everyday spending power.",
+    body: "Treat a student overdraft as a safety net, not everyday spending power.",
     category: "budgeting",
     sourceLabel: "MoneyHelper — Budgeting for college or university",
     sourceUrl: "https://www.moneyhelper.org.uk/en/family-and-care/student-and-graduate-money/budgeting-for-college-or-university",
@@ -133,7 +133,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "track-spending",
     title: "Track where your money actually goes",
-    body: "Writing down or tracking every payment for a couple of weeks often reveals easy places to cut back without much sacrifice.",
+    body: "Tracking every payment for a couple of weeks often reveals easy places to cut back.",
     category: "budgeting",
     sourceLabel: "MoneyHelper — Budgeting for college or university",
     sourceUrl: "https://www.moneyhelper.org.uk/en/family-and-care/student-and-graduate-money/budgeting-for-college-or-university",
@@ -143,7 +143,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "small-savings-buffer",
     title: "Even a small savings buffer helps",
-    body: "Putting aside a little when you can - even £5 a week - builds a cushion for unexpected costs like a bill or a broken laptop charger.",
+    body: "Even £5 a week builds a cushion for unexpected costs.",
     category: "budgeting",
     sourceLabel: "MoneyHelper — Budgeting for college or university",
     sourceUrl: "https://www.moneyhelper.org.uk/en/family-and-care/student-and-graduate-money/budgeting-for-college-or-university",
@@ -153,7 +153,7 @@ export const MONEY_TIPS: MoneyTip[] = [
   {
     id: "change-of-circumstances",
     title: "Tell Student Finance if things change",
-    body: "If your circumstances change - household income, course, or living arrangements - tell Student Finance as soon as possible. It can affect what you're entitled to.",
+    body: "A change in household income, course or living arrangements can affect what you're entitled to.",
     category: "student_finance",
     sourceLabel: "GOV.UK — Student finance for undergraduates",
     sourceUrl: "https://www.gov.uk/student-finance",

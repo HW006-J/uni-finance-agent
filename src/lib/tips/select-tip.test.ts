@@ -64,9 +64,21 @@ describe("buildTipQueue", () => {
   });
 
   it("falls back to the general rotation with no contextual match", () => {
-    const summary = summaryWith({ currentBalance: 500, balanceKnown: true }, { incomes: [{ id: "i1", profileId: "p1", source: "Wages", amount: 100, date: "2026-01-05T00:00:00.000Z", frequency: "weekly", createdAt: "", updatedAt: "" }] });
+    // A known MAJOR payment (not just a recurring wage) is required to avoid the "no major income known" trigger - see findNextMajorIncome.
+    const summary = summaryWith(
+      { currentBalance: 500, balanceKnown: true },
+      { incomes: [{ id: "i1", profileId: "p1", source: "Maintenance Loan", amount: 3000, date: "2099-06-01T00:00:00.000Z", frequency: "one_off", createdAt: "", updatedAt: "" }] },
+    );
     const queue = buildTipQueue({ page: "budget", summary });
     expect(queue.every((t) => !t.trigger)).toBe(true);
+  });
+
+  it("still surfaces the 'no major income known' tip when only a recurring wage is on record", () => {
+    const summary = summaryWith(
+      { currentBalance: 500, balanceKnown: true },
+      { incomes: [{ id: "i1", profileId: "p1", source: "Wages", amount: 100, date: "2026-01-05T00:00:00.000Z", frequency: "weekly", createdAt: "", updatedAt: "" }] },
+    );
+    expect(detectTriggers({ page: "budget", summary })).toContain("no_income_known");
   });
 
   it("never returns duplicate tips", () => {

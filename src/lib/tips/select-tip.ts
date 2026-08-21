@@ -20,7 +20,7 @@ export function detectTriggers(context: TipContext): TipTrigger[] {
     if (summary.discretionaryCash !== null && summary.discretionaryCash < 0) {
       triggers.push("shortfall_projected");
     }
-    if (summary.nextIncome === null && summary.fundingAwards.length === 0) {
+    if (summary.nextMajorPayment === null && summary.fundingAwards.length === 0) {
       triggers.push("no_income_known");
     }
     if (summary.fundingAwards.some((a) => !a.scheduleKnown)) {
