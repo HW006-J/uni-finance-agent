@@ -121,6 +121,29 @@ describe("LoanTrackerShell - How this works disclosures", () => {
   });
 });
 
+describe("LoanTrackerShell - Custom Loan mode switch", () => {
+  it("defaults to Student Loan mode with the existing content intact", () => {
+    render(<LoanTrackerShell />);
+    expect(screen.getByRole("tab", { name: "Student Loan" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Your estimated outcome")).toBeInTheDocument();
+  });
+
+  it("switches to the Custom Loan calculator without touching Student Loan state, and back again", () => {
+    render(<LoanTrackerShell />);
+
+    fireEvent.click(screen.getByRole("tab", { name: "Custom Loan" }));
+    expect(screen.getByRole("tab", { name: "Custom Loan" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Laptop finance")).toBeInTheDocument();
+    expect(screen.getByText("Student loan vs normal borrowing")).toBeInTheDocument();
+    // The Student Loan assumptions panel is not rendered while in Custom Loan mode.
+    expect(screen.queryByText("Your assumptions")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Student Loan" }));
+    expect(screen.getByText("Your assumptions")).toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: /starting salary - exact value/i })).toHaveValue(32000);
+  });
+});
+
 describe("LoanTrackerShell - reduced text still carries required results", () => {
   it("keeps the key result labels visible without expanding any disclosure", () => {
     render(<LoanTrackerShell />);

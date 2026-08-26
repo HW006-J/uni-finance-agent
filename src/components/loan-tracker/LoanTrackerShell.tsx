@@ -7,6 +7,7 @@ import { MoneyTipCard } from "@/components/dashboard/MoneyTipCard";
 import { LoanBalanceChart } from "./LoanBalanceChart";
 import { SliderField } from "./SliderField";
 import { HowThisWorks } from "./HowThisWorks";
+import { CustomLoanPanel } from "./CustomLoanPanel";
 import { EXAMPLE_SCENARIO, isExampleScenario, type LoanTrackerState } from "./exampleScenario";
 import {
   EXTRA_REPAYMENT_PRESETS,
@@ -49,6 +50,7 @@ function formatYearMonth(iso: string): string {
 }
 
 export function LoanTrackerShell() {
+  const [mode, setMode] = useState<"student" | "custom">("student");
   const [state, setState] = useState<LoanTrackerState>(EXAMPLE_SCENARIO);
   const [planOverride, setPlanOverride] = useState<LoanPlan | null>(null);
   const [showManualPlanPicker, setShowManualPlanPicker] = useState(false);
@@ -137,23 +139,60 @@ export function LoanTrackerShell() {
         <div>
           <h1 className="text-2xl font-extrabold text-ink">Loan Tracker</h1>
           <p className="mt-1 text-xs font-medium text-ink-faint">
-            English undergraduate loans only · illustrative estimate, not financial advice
+            {mode === "student"
+              ? "English undergraduate loans only · illustrative estimate, not financial advice"
+              : "Model other borrowing, like a personal loan, overdraft or BNPL balance · illustrative estimate, not financial advice"}
           </p>
-          {isExample ? (
+
+          <div
+            className="mt-3 inline-flex items-center gap-1 rounded-2xl bg-cream-dark p-1"
+            role="tablist"
+            aria-label="Loan Tracker mode"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "student"}
+              onClick={() => setMode("student")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
+                mode === "student" ? "bg-surface text-brand-dark shadow-tactile-sm" : "text-ink-soft hover:text-ink"
+              }`}
+            >
+              Student Loan
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={mode === "custom"}
+              onClick={() => setMode("custom")}
+              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition-colors ${
+                mode === "custom" ? "bg-surface text-brand-dark shadow-tactile-sm" : "text-ink-soft hover:text-ink"
+              }`}
+            >
+              Custom Loan
+            </button>
+          </div>
+
+          {mode === "student" && isExample ? (
             <p className="mt-2 inline-block rounded-full bg-accent-light px-3 py-1 text-xs font-bold text-accent-dark">
               Example projection — change any value
             </p>
           ) : null}
         </div>
-        <button
-          type="button"
-          onClick={resetToExample}
-          className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-bold text-ink-soft hover:bg-cream-dark"
-        >
-          Reset to example
-        </button>
+        {mode === "student" ? (
+          <button
+            type="button"
+            onClick={resetToExample}
+            className="rounded-full border border-border bg-surface px-4 py-2 text-xs font-bold text-ink-soft hover:bg-cream-dark"
+          >
+            Reset to example
+          </button>
+        ) : null}
       </div>
 
+      {mode === "custom" ? (
+        <CustomLoanPanel />
+      ) : (
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="p-6 lg:col-span-1">
           <h2 className="text-lg font-extrabold text-ink">Your assumptions</h2>
@@ -412,6 +451,7 @@ export function LoanTrackerShell() {
           <MoneyTipCard context={{ page: "loan_tracker" }} />
         </div>
       </div>
+      )}
 
       <p className="mx-auto mt-8 max-w-3xl text-center text-xs text-ink-faint">
         Runway doesn&rsquo;t give financial advice. Figures are estimates under current rules and may change.
