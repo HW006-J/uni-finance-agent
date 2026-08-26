@@ -24,7 +24,7 @@ describe("CustomLoanPanel - example scenario on load", () => {
     expect(scoped.getByText("Estimated time to repay")).toBeInTheDocument();
     expect(scoped.getByText("Total interest paid")).toBeInTheDocument();
     expect(scoped.getByText("Total amount repaid")).toBeInTheDocument();
-    // £1,500 at 24.9% APR repaid at £100/month: 19 months = 1 year 7 months, £315.75 interest.
+    // £1,500 at a 24.9% annual interest rate repaid at £100/month: 19 months = 1 year 7 months, £315.75 interest.
     expect(scoped.getByText("1 year 7 months")).toBeInTheDocument();
     expect(scoped.getByText("£315.75")).toBeInTheDocument();
     expect(scoped.getByText("£1,815.75")).toBeInTheDocument();
@@ -108,12 +108,35 @@ describe("CustomLoanPanel - editing the example", () => {
   });
 });
 
+describe("CustomLoanPanel - annual interest rate wording", () => {
+  it("labels the rate input 'Annual interest rate', not APR", () => {
+    render(<CustomLoanPanel />);
+    expect(screen.getByText("Annual interest rate")).toBeInTheDocument();
+    expect(screen.queryByText("Interest rate (APR)")).not.toBeInTheDocument();
+    expect(screen.getByRole("spinbutton", { name: /annual interest rate - exact value/i })).toBeInTheDocument();
+  });
+
+  it("shows the supporting text for the rate input", () => {
+    render(<CustomLoanPanel />);
+    expect(screen.getByText("Enter the annual rate charged on the outstanding balance.")).toBeInTheDocument();
+  });
+
+  it("discloses that this is an illustrative monthly rate derived from the annual rate, closed until clicked", () => {
+    render(<CustomLoanPanel />);
+    expect(screen.queryByText(/monthly rate derived from the annual interest rate/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "How this works" }));
+    expect(screen.getByText(/monthly rate derived from the annual interest rate/)).toBeInTheDocument();
+    expect(screen.getByText(/Actual lender calculations, fees and repayment terms may differ/)).toBeInTheDocument();
+  });
+});
+
 describe("CustomLoanPanel - the 'balance never falls' warning", () => {
   it("shows a warning and no fake payoff when repayment doesn't exceed the interest accruing", () => {
     render(<CustomLoanPanel />);
 
     fireEvent.change(screen.getByRole("spinbutton", { name: /balance - exact value/i }), { target: { value: "5000" } });
-    fireEvent.change(screen.getByRole("spinbutton", { name: /interest rate \(apr\) - exact value/i }), { target: { value: "24" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: /annual interest rate - exact value/i }), { target: { value: "24" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: /monthly repayment - exact value/i }), { target: { value: "50" } });
 
     expect(screen.getByText("At this repayment level, your balance is not currently falling.")).toBeInTheDocument();
@@ -122,11 +145,11 @@ describe("CustomLoanPanel - the 'balance never falls' warning", () => {
     expect(screen.queryByText("Estimated time to repay")).not.toBeInTheDocument();
   });
 
-  it("supports 0% APR (e.g. a 0% BNPL balance) with a normal payoff, not a warning", () => {
+  it("supports a 0% annual interest rate (e.g. a 0% BNPL balance) with a normal payoff, not a warning", () => {
     render(<CustomLoanPanel />);
 
     fireEvent.change(screen.getByRole("spinbutton", { name: /balance - exact value/i }), { target: { value: "600" } });
-    fireEvent.change(screen.getByRole("spinbutton", { name: /interest rate \(apr\) - exact value/i }), { target: { value: "0" } });
+    fireEvent.change(screen.getByRole("spinbutton", { name: /annual interest rate - exact value/i }), { target: { value: "0" } });
     fireEvent.change(screen.getByRole("spinbutton", { name: /monthly repayment - exact value/i }), { target: { value: "100" } });
 
     expect(screen.queryByText("At this repayment level, your balance is not currently falling.")).not.toBeInTheDocument();

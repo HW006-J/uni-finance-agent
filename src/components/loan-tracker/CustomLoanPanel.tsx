@@ -13,7 +13,7 @@ import {
   CUSTOM_LOAN_BALANCE_SLIDER,
   CUSTOM_LOAN_REPAYMENT_PRESETS,
   CUSTOM_LOAN_REPAYMENT_SLIDER,
-  formatCustomLoanAprLabel,
+  formatAnnualRateLabel,
   formatCustomLoanRepaymentLabel,
 } from "./customLoanInputs";
 import { formatMoney, formatMoneyInputPreview, getLargeAmountNotice } from "@/lib/finance/format";
@@ -113,14 +113,22 @@ export function CustomLoanPanel() {
           />
 
           <SliderField
-            label="Interest rate (APR)"
+            label="Annual interest rate"
             value={state.aprPercent}
             onChange={(v) => updateField("aprPercent", v)}
             range={CUSTOM_LOAN_APR_SLIDER}
-            displayValue={Number.isFinite(parsedApr) ? formatCustomLoanAprLabel(parsedApr) : "Enter a rate"}
+            displayValue={Number.isFinite(parsedApr) ? formatAnnualRateLabel(parsedApr) : "Enter a rate"}
             inputSuffix="%"
             presets={CUSTOM_LOAN_APR_PRESETS}
-            hint="0% is supported - some BNPL products charge no interest"
+            hint="Enter the annual rate charged on the outstanding balance."
+            belowSlider={
+              <HowThisWorks label="How this works" title="How this works">
+                <p>
+                  This is an illustrative projection using a monthly rate derived from the annual interest rate. Actual
+                  lender calculations, fees and repayment terms may differ.
+                </p>
+              </HowThisWorks>
+            }
           />
 
           <SliderField

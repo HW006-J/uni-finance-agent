@@ -31,9 +31,10 @@ export const CUSTOM_LOAN_REPAYMENT_PRESETS: SliderPreset[] = [
   { label: "£200", value: 200 },
 ];
 
-export function formatCustomLoanAprLabel(percent: number): string {
+/** Displays the entered annual interest rate - deliberately not labelled "APR", since this is an illustrative rate, not a reproduction of any lender's contractual APR calculation. */
+export function formatAnnualRateLabel(percent: number): string {
   const rounded = Math.round(percent * 10) / 10;
-  return `${rounded}% APR`;
+  return `${rounded}%/year`;
 }
 
 export function formatCustomLoanRepaymentLabel(amount: number): string {
